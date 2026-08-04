@@ -260,14 +260,18 @@ passam pelo middleware CORS. Em upload, remova qualquer `Content-Type` definido 
 
 ## Railway
 
-1. Crie PostgreSQL e dois serviços a partir deste repositório: API e Worker.
-2. Compartilhe as mesmas variáveis e o mesmo volume montado em `/data`.
-3. Defina `STORAGE_PATH=/data/documents`. Sem volume, o disco é efêmero e não serve para retenção.
-4. API: use o comando do `railway.json`; ele liga em `0.0.0.0:$PORT` e verifica `/health`.
-5. Worker: sobrescreva Start Command com `python -m app.workers.extraction_worker`.
-6. Configure Pre-deploy Command somente uma vez/serviço coordenado: `alembic upgrade head`.
-   Não rode migrations simultaneamente em cada réplica.
-7. Para produção durável, substitua futuramente o backend local por S3/R2.
+1. Crie um projeto a partir deste repositório e adicione PostgreSQL.
+2. No serviço da aplicação, referencie `DATABASE_URL=${{Postgres.DATABASE_URL}}`.
+3. Anexe um volume em `/data` e defina `STORAGE_PATH=/data/documents`. Sem volume, uploads são
+   perdidos a cada nova implantação.
+4. Defina `APP_ENV=production` e `DEFAULT_EXTRACTION_ENGINE=auto`.
+5. Gere um domínio público. A interface de teste fica em `/ui/` e a documentação em `/docs`.
+
+O `railway.json` executa `alembic upgrade head` antes da implantação e inicia
+`python -m app.combined`, que mantém API e worker no mesmo contêiner. Essa topologia é intencional:
+o backend atual armazena PDFs em disco, e os dois processos precisam enxergar o mesmo volume. Não
+aumente o número de réplicas enquanto o armazenamento for local. Ao migrar para S3/R2, API e
+workers podem voltar a serviços separados e escalar independentemente.
 
 O Dockerfile usa Python 3.12 slim e usuário não root. Logs JSON vão para stdout e carregam IDs,
 sem conteúdo integral do PDF ou segredos.
@@ -276,7 +280,7 @@ sem conteúdo integral do PDF ou segredos.
 
 `marker-pdf==2.0.0` está fixado. O primeiro uso pode baixar modelos grandes e aumentar muito o
 tempo de startup; CPU é suportada, mas PDFs complexos podem exigir vários GiB de RAM e sofrer
-timeout. Separe API/worker, mantenha cache/volume para modelos, limite concorrência e considere GPU
+timeout. Mantenha cache/volume para modelos, limite concorrência e considere GPU
 no futuro. Os testes normais usam engine fake/nativa; execute integrações pesadas com
 `pytest -m slow -o addopts=''`.
 

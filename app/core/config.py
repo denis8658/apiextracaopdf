@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     cors_expose_headers: Annotated[list[str], NoDecode] = ["X-Request-ID", "Content-Disposition"]
     cors_max_age: int = Field(3600, ge=0)
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: object) -> object:
+        """Use Railway's PostgreSQL URL with SQLAlchemy's asyncpg driver."""
+        if not isinstance(value, str):
+            return value
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+asyncpg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
     @field_validator(
         "cors_allowed_origins",
         "cors_allowed_methods",
