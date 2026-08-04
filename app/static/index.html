@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Interface de teste da API de extração documental" />
+    <title>Leitor — Extração documental</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <header class="topbar">
+      <a class="brand" href="/ui/" aria-label="Leitor — início">
+        <span class="brand-mark">L</span>
+        <span>
+          <strong>Leitor</strong>
+          <small>extração documental</small>
+        </span>
+      </a>
+      <div class="service-status" id="serviceStatus" aria-live="polite">
+        <span class="status-dot"></span>
+        <span>verificando serviço</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">PDF → TEXTO · MARKDOWN · JSON</p>
+        <h1>Veja o que existe<br />dentro do documento.</h1>
+        <p class="hero-copy">
+          Envie um PDF, acompanhe o processamento página por página e inspecione o resultado
+          estruturado sem sair desta tela.
+        </p>
+      </section>
+
+      <section class="workspace" aria-label="Área de teste">
+        <article class="panel upload-panel">
+          <div class="panel-heading">
+            <span class="step">01</span>
+            <div>
+              <h2>Enviar documento</h2>
+              <p>PDF de até 50 MB</p>
+            </div>
+          </div>
+
+          <form id="uploadForm">
+            <label class="dropzone" id="dropzone" for="pdfFile">
+              <input id="pdfFile" name="file" type="file" accept="application/pdf,.pdf" required />
+              <span class="file-glyph">PDF</span>
+              <strong id="dropTitle">Arraste o arquivo até aqui</strong>
+              <span id="dropHint">ou clique para selecionar</span>
+            </label>
+
+            <div class="field-grid">
+              <label>
+                <span>Motor</span>
+                <select id="engine" name="engine">
+                  <option value="auto">Automático</option>
+                  <option value="native">PyMuPDF — nativo</option>
+                  <option value="marker">Marker — OCR/layout</option>
+                </select>
+              </label>
+              <label>
+                <span>API</span>
+                <input id="apiBase" type="url" autocomplete="url" />
+              </label>
+            </div>
+
+            <label class="check-row">
+              <input id="retainOriginal" type="checkbox" checked />
+              <span>Manter o arquivo original após a extração</span>
+            </label>
+
+            <button class="primary-button" id="submitButton" type="submit">
+              <span>Processar documento</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </form>
+        </article>
+
+        <article class="panel process-panel" id="processPanel">
+          <div class="panel-heading">
+            <span class="step">02</span>
+            <div>
+              <h2>Processamento</h2>
+              <p id="processCaption">Aguardando um documento</p>
+            </div>
+          </div>
+
+          <div class="empty-state" id="emptyState">
+            <div class="orbit"><span></span></div>
+            <p>O andamento da extração aparecerá aqui.</p>
+          </div>
+
+          <div class="progress-card hidden" id="progressCard" aria-live="polite">
+            <div class="document-row">
+              <div class="document-icon">P</div>
+              <div class="document-name">
+                <strong id="documentName">documento.pdf</strong>
+                <span id="documentMeta">Preparando envio</span>
+              </div>
+              <span class="status-pill" id="statusPill">queued</span>
+            </div>
+            <div class="progress-label">
+              <span id="progressMessage">Na fila</span>
+              <strong id="progressPercent">0%</strong>
+            </div>
+            <div class="progress-track"><span id="progressBar"></span></div>
+            <dl class="job-details">
+              <div><dt>Documento</dt><dd id="documentId">—</dd></div>
+              <div><dt>Trabalho</dt><dd id="jobId">—</dd></div>
+              <div><dt>Motor usado</dt><dd id="engineUsed">—</dd></div>
+            </dl>
+          </div>
+        </article>
+      </section>
+
+      <section class="results hidden" id="resultsSection">
+        <div class="results-heading">
+          <div>
+            <p class="eyebrow">RESULTADO</p>
+            <h2>Conteúdo extraído</h2>
+          </div>
+          <div class="result-actions">
+            <button class="secondary-button" id="copyButton" type="button">Copiar</button>
+            <button class="secondary-button" id="downloadButton" type="button">Baixar</button>
+          </div>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Formato do resultado">
+          <button class="tab active" data-format="text" role="tab" aria-selected="true">Texto</button>
+          <button class="tab" data-format="markdown" role="tab" aria-selected="false">Markdown</button>
+          <button class="tab" data-format="json" role="tab" aria-selected="false">JSON</button>
+        </div>
+        <div class="result-summary" id="resultSummary"></div>
+        <pre class="result-content" id="resultContent" tabindex="0"></pre>
+      </section>
+
+      <aside class="error-toast hidden" id="errorToast" role="alert">
+        <strong id="errorTitle">Não foi possível concluir</strong>
+        <span id="errorMessage"></span>
+        <button id="dismissError" type="button" aria-label="Fechar mensagem">×</button>
+      </aside>
+    </main>
+
+    <footer>
+      <span>Leitor v1.0</span>
+      <a href="/docs">Documentação da API</a>
+    </footer>
+    <script src="/ui/app.js" defer></script>
+  </body>
+</html>
