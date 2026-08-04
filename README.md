@@ -88,6 +88,13 @@ ambos devem apontar para o mesmo PostgreSQL e `STORAGE_PATH`.
 
 ## Interface de teste
 
+Implantação pública no Railway:
+
+- Base da API: `https://apiextracaopdf-production.up.railway.app`
+- Interface: `https://apiextracaopdf-production.up.railway.app/ui/`
+- Swagger: `https://apiextracaopdf-production.up.railway.app/docs`
+- Healthcheck: `https://apiextracaopdf-production.up.railway.app/health`
+
 Com a API e o worker em execução, abra:
 
 ```text
