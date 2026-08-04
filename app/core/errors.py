@@ -24,6 +24,7 @@ ERROR_MESSAGES = {
     "file_too_large": "O arquivo excede o limite configurado.",
     "page_limit_exceeded": "O PDF excede o limite de páginas configurado.",
     "corrupted_pdf": "O arquivo PDF está corrompido ou não pôde ser aberto.",
+    "pdf_engine_unavailable": "O componente de leitura de PDF não está instalado no servidor.",
     "encrypted_pdf_not_supported": "PDFs protegidos por senha não são suportados.",
     "storage_error": "Não foi possível armazenar o documento.",
     "not_found": "Documento não encontrado.",

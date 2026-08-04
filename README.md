@@ -61,6 +61,9 @@ No terceiro, mantenha o worker aberto:
 Não execute API e worker sequencialmente no mesmo terminal: o processo da API permanece em
 execução até ser interrompido. O Python 3.13 global não é a versão homologada. Um `.venv` Python
 3.12 já foi criado neste diretório; os exemplos chamam seu executável diretamente.
+Os entrypoints também detectam esse ambiente: `python -m app.main` e
+`python -m app.workers.extraction_worker` reiniciam automaticamente com o `.venv` 3.12. Se ele
+não existir, a inicialização informa claramente a versão exigida.
 
 ### Ambiente PostgreSQL
 

@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from app.extraction.marker_engine import html_to_text
 from app.extraction.normalizer import normalize_result, normalize_text
 from app.extraction.pymupdf_engine import PyMuPDFExtractionEngine
 from app.extraction.router import ExtractionRouter
+from app.extraction.validators import inspect_pdf
 from app.schemas.extraction import ExtractionOptions
 
 
@@ -41,6 +43,17 @@ async def test_auto_selects_native_for_text_pdf(tmp_path, sample_pdf):
 def test_normalizer_keeps_unicode_and_removes_controls():
     assert normalize_text("  ação\r\nlinha\x00") == "ação\nlinha"
     assert html_to_text("<p>Janela <strong>pivotante</strong></p>") == "Janela\npivotante"
+
+
+@pytest.mark.asyncio
+async def test_missing_pdf_engine_is_not_reported_as_corrupted(tmp_path, monkeypatch):
+    path = tmp_path / "document.pdf"
+    path.write_bytes(b"%PDF-1.7\n")
+    monkeypatch.setitem(sys.modules, "pymupdf", None)
+    with pytest.raises(Exception) as captured:
+        await inspect_pdf(path, Settings())
+    assert captured.value.code == "pdf_engine_unavailable"
+    assert captured.value.status_code == 503
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,11 @@ import os
 import uuid
 from pathlib import Path
 
+if __name__ == "__main__":
+    from app.core.runtime import reexec_with_project_python
+
+    reexec_with_project_python("app.main")
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder

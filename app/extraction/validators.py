@@ -33,7 +33,10 @@ def sanitize_filename(filename: str) -> str:
 async def inspect_pdf(path: Path, settings: Settings) -> int:
     try:
         import pymupdf
+    except ImportError as exc:
+        raise pdf_error("pdf_engine_unavailable", 503) from exc
 
+    try:
         document = await asyncio.to_thread(pymupdf.open, path)
         try:
             if document.needs_pass:

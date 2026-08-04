@@ -4,6 +4,11 @@ import time
 import traceback
 from datetime import UTC, datetime
 
+if __name__ == "__main__":
+    from app.core.runtime import reexec_with_project_python
+
+    reexec_with_project_python("app.workers.extraction_worker")
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
