@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     pdf_native_min_text_page_ratio: float = Field(0.70, ge=0, le=1)
     extraction_worker_poll_seconds: float = Field(2, gt=0)
     extraction_max_attempts: int = Field(3, ge=1)
+    structuring_provider: Literal["openai"] = "openai"
+    structuring_model: str = "gpt-5.6-sol"
+    openai_api_key: SecretStr | None = None
+    structuring_timeout_seconds: int = Field(120, gt=0)
+    structuring_max_attempts: int = Field(3, ge=1)
+    structuring_worker_poll_seconds: float = Field(2, gt=0)
+    order_structuring_prompt_version: str = "1.0.0"
+    order_structuring_schema_version: str = "1.0.0"
+    structuring_auto_approve_min_confidence: float = Field(0.90, ge=0, le=1)
     delete_physical_file: bool = False
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     cors_allow_credentials: bool = True

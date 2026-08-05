@@ -21,7 +21,9 @@ def sample_pdf() -> bytes:
         page = document.new_page()
         page.insert_text(
             (72, 72),
-            f"Orçamento 1790 - página {number}\nCliente: PAULA REGINA\nDescrição: JANELA PIVOTANTE",
+            f"Orçamento 1790 - página {number}\n"
+            "Cliente: CLIENTE EXEMPLO\n"
+            "Descrição: JANELA PIVOTANTE",
         )
     content = document.tobytes()
     document.close()

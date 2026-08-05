@@ -4,7 +4,8 @@ API FastAPI assíncrona para receber PDFs, persistir metadados no PostgreSQL e e
 Markdown e JSON por página. O upload responde `202`; um worker separado captura trabalhos com
 `FOR UPDATE SKIP LOCKED`, evitando que duas instâncias processem o mesmo item.
 
-O MVP representa fielmente o documento. Ele não interpreta pedidos, não cria planos de corte e
+O leitor representa fielmente o documento. Depois da extração bruta, o módulo opcional de
+estruturação interpreta cliente, pedido e itens com saída validada. Ele não cria planos de corte e
 não inventa campos ausentes.
 
 ## Arquitetura e fluxo
@@ -14,6 +15,7 @@ Base44 -> API -> armazenamento local/volume
              -> PostgreSQL (documento + job queued)
 Worker -> PostgreSQL (claim exclusivo) -> PyMuPDF ou Marker -> páginas + resultado
 Base44 -> polling de status -> resultado
+Structure Worker -> conteúdo extraído -> OpenAI/Pydantic -> preview validado -> cliente/pedido/itens
 ```
 
 - `app/api`: rotas HTTP, saúde e dependências.
@@ -113,6 +115,11 @@ Todas as opções estão em `.env.example`. Obrigatórias em produção: `DATABA
 50 MiB, 500 páginas, chunks de 1 MiB e 3 tentativas. `DELETE_PHYSICAL_FILE=false` mantém o arquivo
 após exclusão lógica; altere conscientemente.
 
+Para estruturação, configure `OPENAI_API_KEY` no Railway e mantenha
+`STRUCTURING_PROVIDER=openai`. O modelo é configurável por `STRUCTURING_MODEL`; o padrão atual é
+`gpt-5.6-sol`. Schema e prompt iniciam em `1.0.0`. A chave nunca deve ser colocada no Git, enviada
+ao frontend ou registrada nos logs.
+
 Não use `*` em origens quando `CORS_ALLOW_CREDENTIALS=true`. Listas usam vírgulas. Para adicionar
 o Base44:
 
@@ -158,6 +165,104 @@ gera um UUID. Erros têm a forma:
 
 Estados: `queued`, `processing`, `completed`, `failed`, `cancelled`. Não solicite resultado antes
 de `completed`; `409 result_not_ready` é esperado enquanto processa.
+
+## ESTRUTURAÇÃO DE PEDIDOS EXTRAÍDOS
+
+Esta camada é executada somente depois da extração bruta. O frontend envia apenas o
+`document_id`; a API recupera texto e páginas armazenados, preserva os marcadores de página e cria
+um job durável no PostgreSQL. O modo inicial recomendado é `preview`.
+
+O schema `1.0.0` contém somente número/data/cor, cliente e itens. Prazos de entrega ou produção,
+condições de pagamento, vencimentos, cronogramas e outras condições comerciais são ignorados e
+não possuem colunas no banco nem campos na resposta. Páginas contendo somente essas informações,
+cabeçalhos ou rodapés não geram itens.
+
+Fluxo obrigatório para o Base44:
+
+1. Enviar o PDF e aguardar a extração bruta em `completed`.
+2. Solicitar estruturação em `preview` usando o `document_id`.
+3. Consultar o structure job até `completed`, `needs_review` ou `failed`.
+4. Buscar e exibir o preview, com o cliente uma única vez e os itens em ordem.
+5. Conferir avisos, medidas, códigos repetidos e ocorrências.
+6. Persistir o mesmo preview aprovado e guardar `customer_id` e `order_id`.
+
+| Objetivo | Método e rota | Observações |
+|---|---|---|
+| Iniciar preview/persist | `POST /api/v1/documents/{document_id}/structure/order` | Body `mode` e `force_reprocess`; aceita `Idempotency-Key` |
+| Consultar job | `GET /api/v1/structure-jobs/{job_id}` | Progresso, versões, provider, modelo e erro seguro |
+| Buscar preview | `GET /api/v1/structure-jobs/{job_id}/result` | Resultado, totais determinísticos, checks e avisos |
+| Persistir preview | `POST /api/v1/structure-jobs/{job_id}/persist` | Transação única; aceita `Idempotency-Key` |
+| Buscar pedido | `GET /api/v1/orders/{order_id}` | Cliente aparece uma vez no nível do pedido |
+| Listar itens | `GET /api/v1/orders/{order_id}/items` | Cada item contém somente `order_id` |
+| Reprocessar | `POST /api/v1/documents/{document_id}/structure/order/reprocess` | Cria nova versão sem sobrescrever a anterior |
+| Listar versões | `GET /api/v1/documents/{document_id}/structure-results` | Histórico de previews e persistências |
+
+Não há autenticação no MVP. Envie `Content-Type: application/json`, `X-Request-ID` opcional e uma
+`Idempotency-Key` estável em cada POST crítico. A mesma chave e o mesmo conteúdo devolvem a
+operação original; reutilizá-la com conteúdo diferente retorna `409 idempotency_conflict`.
+
+```javascript
+const structureResponse = await fetch(
+  `${API_BASE_URL}/api/v1/documents/${documentId}/structure/order`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": crypto.randomUUID(),
+      "X-Request-ID": crypto.randomUUID()
+    },
+    body: JSON.stringify({mode: "preview", force_reprocess: false})
+  }
+);
+const structureJob = await structureResponse.json();
+
+for (;;) {
+  const statusResponse = await fetch(
+    `${API_BASE_URL}/api/v1/structure-jobs/${structureJob.structure_job_id}`
+  );
+  const status = await statusResponse.json();
+  if (["completed", "needs_review", "failed", "cancelled"].includes(status.status)) break;
+  await new Promise(resolve => setTimeout(resolve, 2000));
+}
+
+const preview = await fetch(
+  `${API_BASE_URL}/api/v1/structure-jobs/${structureJob.structure_job_id}/result`
+).then(response => response.json());
+
+const persisted = await fetch(
+  `${API_BASE_URL}/api/v1/structure-jobs/${structureJob.structure_job_id}/persist`,
+  {
+    method: "POST",
+    headers: {"Idempotency-Key": crypto.randomUUID()}
+  }
+).then(response => response.json());
+```
+
+O frontend não deve criar um cliente por item, repetir dados do cliente nos itens, eliminar códigos
+repetidos ou persistir antes da conferência do preview. Após timeout de persistência, consulte o
+estado anterior e reutilize a mesma chave; não gere outra chave às cegas.
+
+Formato persistido para consumo:
+
+```json
+{
+  "id": "order-uuid",
+  "order_number": "1790",
+  "customer": {
+    "id": "customer-uuid",
+    "name": "CLIENTE EXEMPLO"
+  },
+  "items": [
+    {"id": "item-uuid", "order_id": "order-uuid", "original_code": "J01"}
+  ]
+}
+```
+
+Erros específicos incluem `document_not_ready`, `document_has_no_extracted_content`,
+`structure_job_already_running`, `structure_provider_error`, `structure_timeout`,
+`structure_validation_failed`, `structure_needs_review`, `structure_already_persisted` e
+`idempotency_conflict`. Todos usam o envelope padrão com `request_id` e não expõem prompt, chave,
+SQL, resposta bruta ou traceback.
 
 ### Upload para Base44
 
@@ -272,10 +377,13 @@ passam pelo middleware CORS. Em upload, remova qualquer `Content-Type` definido 
 3. Anexe um volume em `/data` e defina `STORAGE_PATH=/data/documents`. Sem volume, uploads são
    perdidos a cada nova implantação.
 4. Defina `APP_ENV=production` e `DEFAULT_EXTRACTION_ENGINE=auto`.
-5. Gere um domínio público. A interface de teste fica em `/ui/` e a documentação em `/docs`.
+5. Para habilitar a estruturação, defina `OPENAI_API_KEY`, `STRUCTURING_PROVIDER=openai` e
+   `STRUCTURING_MODEL=gpt-5.6-sol`.
+6. Gere um domínio público. A interface de teste fica em `/ui/` e a documentação em `/docs`.
 
 O `railway.json` executa `alembic upgrade head` antes da implantação e inicia
-`python -m app.combined`, que mantém API e worker no mesmo contêiner. Essa topologia é intencional:
+`python -m app.combined`, que mantém API, worker de extração e worker de estruturação no mesmo
+contêiner. Essa topologia é intencional:
 o backend atual armazena PDFs em disco, e os dois processos precisam enxergar o mesmo volume. Não
 aumente o número de réplicas enquanto o armazenamento for local. Ao migrar para S3/R2, API e
 workers podem voltar a serviços separados e escalar independentemente.

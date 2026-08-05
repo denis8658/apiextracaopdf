@@ -6,6 +6,7 @@ import uvicorn
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.workers.extraction_worker import worker_loop
+from app.workers.structure_worker import structure_worker_loop
 
 
 async def serve() -> None:
@@ -23,6 +24,7 @@ async def run() -> None:
     tasks = {
         asyncio.create_task(serve(), name="api"),
         asyncio.create_task(worker_loop(), name="worker"),
+        asyncio.create_task(structure_worker_loop(), name="structure-worker"),
     }
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:

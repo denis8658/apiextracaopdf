@@ -30,6 +30,10 @@ app = FastAPI(
     openapi_tags=[
         {"name": "health", "description": "Vivacidade e prontidão"},
         {"name": "documents", "description": "Documentos, trabalhos, páginas e resultados"},
+        {
+            "name": "order-structuring",
+            "description": "Preview, validação e persistência de pedidos extraídos",
+        },
     ],
 )
 
