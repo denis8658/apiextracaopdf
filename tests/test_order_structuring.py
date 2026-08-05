@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.api.dependencies import get_order_structuring_service
 from app.core.config import Settings
 from app.db.base import Base
-from app.db.models import Document, DocumentPage, DocumentResult, OrderItem
+from app.db.models import Customer, Document, DocumentPage, DocumentResult, Order, OrderItem
 from app.main import app
 from app.schemas.order_structuring import (
     CustomerExtraction,
@@ -359,6 +359,8 @@ async def test_budget_1790_preview_persist_and_idempotency(tmp_path, monkeypatch
 
     app.dependency_overrides.pop(get_order_structuring_service, None)
     async with sessions() as session:
+        assert len((await session.scalars(select(Customer))).all()) == 1
+        assert len((await session.scalars(select(Order))).all()) == 1
         assert len((await session.scalars(select(OrderItem))).all()) == 9
     await engine.dispose()
 
