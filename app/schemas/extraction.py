@@ -15,7 +15,7 @@ class ExtractionOptions(BaseModel):
     output_format: Literal["text", "markdown", "json"] = "json"
     ocr_mode: Literal["auto", "always", "never"] = "auto"
     ocr_language: str = "por"
-    ocr_dpi: int = Field(200, ge=72, le=600)
+    ocr_dpi: int = Field(144, ge=72, le=600)
     extract_images: bool = True
     extract_tables: bool = True
     include_coordinates: bool = True

@@ -126,8 +126,9 @@ confiança. Imagens incluem hash, classificação determinística, coordenadas e
 
 ## OCR automático e normalização
 
-O PyMuPDF sempre inspeciona cada página. EasyOCR é o fallback CPU padrão; Marker permanece como
-fallback avançado quando sua infraestrutura VLM estiver disponível. OCR é solicitado quando caracteres ou palavras ficam
+O PyMuPDF sempre inspeciona cada página. EasyOCR é o fallback CPU padrão; ele tenta primeiro a
+orientação original e só avalia rotações quando quantidade/confiança forem insuficientes. Marker
+permanece como fallback avançado quando sua infraestrutura VLM estiver disponível. OCR é solicitado quando caracteres ou palavras ficam
 abaixo do limite ou quando a proporção de caracteres inválidos supera o configurado. O roteador
 cria um PDF temporário de uma única página para o Marker e mescla o resultado com imagens/tabelas
 nativas, evitando OCR do documento inteiro. Falha isolada vira warning e não descarta as demais

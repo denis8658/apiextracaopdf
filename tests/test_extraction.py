@@ -129,6 +129,15 @@ async def test_easyocr_returns_traceable_blocks(tmp_path, sample_pdf, monkeypatc
     assert block.bbox == pytest.approx([5, 10, 55, 25])
 
 
+def test_easyocr_only_searches_rotations_when_first_pass_is_insufficient(tmp_path):
+    engine = EasyOCRExtractionEngine(tmp_path / "models")
+    sufficient = [([], "palavra reconhecida corretamente", 0.90) for _ in range(5)]
+    insufficient = [([], "x", 0.20)]
+    assert engine._is_sufficient(sufficient)
+    assert not engine._is_sufficient(insufficient)
+    assert engine._quality_score(sufficient) > engine._quality_score(insufficient)
+
+
 def test_normalizer_keeps_unicode_and_removes_controls():
     assert normalize_text("  ação\r\nlinha\x00") == "ação\nlinha"
     assert html_to_text("<p>Janela <strong>pivotante</strong></p>") == "Janela\npivotante"

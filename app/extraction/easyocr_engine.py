@@ -60,14 +60,13 @@ class EasyOCRExtractionEngine:
                 image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
                     pixmap.height, pixmap.width, pixmap.n
                 )
-                recognized = reader.readtext(
-                    image,
-                    detail=1,
-                    paragraph=False,
-                    rotation_info=[90, 180, 270],
-                    batch_size=1,
-                    workers=0,
-                )
+                recognized = self._recognize(reader, image, rotation_info=None)
+                rotation_search = False
+                if not self._is_sufficient(recognized):
+                    rotated = self._recognize(reader, image, rotation_info=[90, 180, 270])
+                    if self._quality_score(rotated) > self._quality_score(recognized):
+                        recognized = rotated
+                    rotation_search = True
                 ordered = sorted(recognized, key=self._reading_key)
                 blocks: list[ExtractedBlock] = []
                 texts: list[str] = []
@@ -88,7 +87,11 @@ class EasyOCRExtractionEngine:
                             source="ocr",
                             confidence=score,
                             reading_order=len(blocks) + 1,
-                            metadata={"provider": self.name, "language": language},
+                            metadata={
+                                "provider": self.name,
+                                "language": language,
+                                "rotation_search": rotation_search,
+                            },
                         )
                     )
                     texts.append(content)
@@ -127,6 +130,34 @@ class EasyOCRExtractionEngine:
         return (
             min(float(point[1]) for point in polygon),
             min(float(point[0]) for point in polygon),
+        )
+
+    @staticmethod
+    def _recognize(reader, image, rotation_info):
+        return reader.readtext(
+            image,
+            detail=1,
+            paragraph=False,
+            rotation_info=rotation_info,
+            batch_size=1,
+            workers=0,
+        )
+
+    @classmethod
+    def _is_sufficient(cls, recognized) -> bool:
+        characters = sum(
+            sum(character.isalnum() for character in str(item[1])) for item in recognized
+        )
+        confidence = (
+            sum(float(item[2]) for item in recognized) / len(recognized) if recognized else 0.0
+        )
+        return len(recognized) >= 5 and characters >= 30 and confidence >= 0.45
+
+    @staticmethod
+    def _quality_score(recognized) -> float:
+        return sum(
+            sum(character.isalnum() for character in str(item[1])) * max(0.0, float(item[2]))
+            for item in recognized
         )
 
     @staticmethod

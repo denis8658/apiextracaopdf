@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     pdf_native_min_words_per_page: int = Field(5, ge=0)
     pdf_native_max_invalid_char_ratio: float = Field(0.10, ge=0, le=1)
     pdf_native_min_text_page_ratio: float = Field(0.70, ge=0, le=1)
-    ocr_dpi: int = Field(200, ge=72, le=600)
+    ocr_dpi: int = Field(144, ge=72, le=600)
     ocr_default_language: str = "por"
     ocr_max_concurrency: int = Field(1, ge=1)
     marker_font_path: Path = Path("./tmp/marker/GoNotoCurrent-Regular.ttf")
