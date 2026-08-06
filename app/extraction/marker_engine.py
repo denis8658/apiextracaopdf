@@ -31,6 +31,9 @@ def html_to_text(value: str) -> str:
 class MarkerExtractionEngine:
     name = "marker"
 
+    def __init__(self, font_path: Path | None = None) -> None:
+        self.font_path = font_path or Path("./tmp/marker/GoNotoCurrent-Regular.ttf")
+
     async def extract(self, file_path: Path, options: ExtractionOptions) -> ExtractionResult:
         return await asyncio.to_thread(self._extract_sync, file_path, options)
 
@@ -38,6 +41,10 @@ class MarkerExtractionEngine:
         from marker.config.parser import ConfigParser
         from marker.converters.pdf import PdfConverter
         from marker.models import create_model_dict
+        from marker.settings import settings as marker_settings
+
+        marker_settings.FONT_PATH = str(self.font_path.resolve())
+        marker_settings.FONT_DIR = str(self.font_path.resolve().parent)
 
         parser = ConfigParser(
             {

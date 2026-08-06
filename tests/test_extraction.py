@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
+from app.extraction.easyocr_engine import EasyOCRExtractionEngine
 from app.extraction.marker_engine import html_to_text
 from app.extraction.normalizer import normalize_result, normalize_text
 from app.extraction.pymupdf_engine import PyMuPDFExtractionEngine
@@ -107,6 +108,25 @@ async def test_auto_ocr_replaces_only_deficient_page(tmp_path, monkeypatch):
     assert result.result.pages[1].extraction_method == "ocr"
     assert result.result.pages[1].blocks[0].source == "ocr"
     assert result.result.engine == "hybrid"
+
+
+@pytest.mark.asyncio
+async def test_easyocr_returns_traceable_blocks(tmp_path, sample_pdf, monkeypatch):
+    path = tmp_path / "scanned.pdf"
+    path.write_bytes(sample_pdf)
+    engine = EasyOCRExtractionEngine(tmp_path / "models")
+
+    class ReaderFake:
+        def readtext(self, image, **kwargs):
+            return [([[10, 20], [110, 20], [110, 50], [10, 50]], "texto", 0.92)]
+
+    monkeypatch.setattr(engine, "_reader", lambda language: (ReaderFake(), "pt"))
+    result = await engine.extract(path, ExtractionOptions(ocr_language="por", ocr_dpi=144))
+    assert len(result.pages) == 3
+    block = result.pages[0].blocks[0]
+    assert block.source == "ocr"
+    assert block.confidence == pytest.approx(0.92)
+    assert block.bbox == pytest.approx([5, 10, 55, 25])
 
 
 def test_normalizer_keeps_unicode_and_removes_controls():

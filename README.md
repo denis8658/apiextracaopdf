@@ -17,7 +17,7 @@ Produção: `https://apiextracaopdf-production.up.railway.app`
 ```text
 cliente -> FastAPI -> PDF temporário + PostgreSQL (job/eventos com TTL)
                          |
-worker -> PyMuPDF nativo por página -> heurística -> Marker OCR nas páginas necessárias
+worker -> PyMuPDF nativo por página -> heurística -> EasyOCR/Marker nas páginas necessárias
                          |
               normalização -> texto/Markdown/JSON -> SSE + resultado temporário
                          |
@@ -126,7 +126,8 @@ confiança. Imagens incluem hash, classificação determinística, coordenadas e
 
 ## OCR automático e normalização
 
-O PyMuPDF sempre inspeciona cada página. OCR é solicitado quando caracteres ou palavras ficam
+O PyMuPDF sempre inspeciona cada página. EasyOCR é o fallback CPU padrão; Marker permanece como
+fallback avançado quando sua infraestrutura VLM estiver disponível. OCR é solicitado quando caracteres ou palavras ficam
 abaixo do limite ou quando a proporção de caracteres inválidos supera o configurado. O roteador
 cria um PDF temporário de uma única página para o Marker e mescla o resultado com imagens/tabelas
 nativas, evitando OCR do documento inteiro. Falha isolada vira warning e não descarta as demais
@@ -144,6 +145,8 @@ Consulte `.env.example`. Variáveis principais:
 - `PDF_NATIVE_MIN_CHARS_PER_PAGE`, `PDF_NATIVE_MIN_WORDS_PER_PAGE`.
 - `PDF_NATIVE_MAX_INVALID_CHAR_RATIO`, `OCR_DPI`, `OCR_DEFAULT_LANGUAGE`.
 - `OCR_MAX_CONCURRENCY`, `MAX_IMAGES_PER_DOCUMENT`, `IGNORE_REPEATED_IMAGES`.
+- `MARKER_FONT_PATH` (cache gravável da fonte auxiliar usada pelo Marker).
+- `EASYOCR_MODEL_PATH` (cache gravável dos modelos OCR CPU).
 - `EXTRACTION_TIMEOUT_SECONDS`, `EXTRACTION_JOB_TTL_SECONDS`.
 - `EXTRACTION_CLEANUP_INTERVAL_SECONDS`, `EXTRACTION_SSE_HEARTBEAT_SECONDS`.
 - `EXTRACTION_SSE_TIMEOUT_SECONDS`, `CORS_ALLOWED_ORIGINS`.
@@ -178,7 +181,8 @@ sintéticos e mocks, sem chamadas externas.
 
 `railway.json` aplica `alembic upgrade head`, inicia `python -m app.combined` e verifica `/health`.
 Configure `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `APP_ENV=production` e
-`STORAGE_PATH=/data/documents`; anexe um volume a `/data`. O primeiro OCR pode baixar/carregar
+`STORAGE_PATH=/data/documents`, `EASYOCR_MODEL_PATH=/data/easyocr-models` e
+`MARKER_FONT_PATH=/data/marker/GoNotoCurrent-Regular.ttf`; anexe um volume a `/data`. O primeiro OCR pode baixar/carregar
 modelos grandes, consumir vários GiB de RAM e ser lento em CPU.
 
 ## Limitações conhecidas e próximos passos

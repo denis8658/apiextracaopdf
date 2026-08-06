@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import Settings
+from app.extraction.easyocr_engine import EasyOCRExtractionEngine
 from app.extraction.marker_engine import MarkerExtractionEngine
 from app.extraction.pymupdf_engine import PyMuPDFExtractionEngine
 from app.schemas.extraction import ExtractionOptions, ExtractionResult
@@ -21,7 +22,8 @@ class ExtractionRouter:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.native = PyMuPDFExtractionEngine(settings.max_images_per_document)
-        self.marker = MarkerExtractionEngine()
+        self.easyocr = EasyOCRExtractionEngine(settings.easyocr_model_path)
+        self.marker = MarkerExtractionEngine(settings.marker_font_path)
 
     async def extract(
         self,
@@ -107,7 +109,12 @@ class ExtractionRouter:
     async def _ocr_page(self, path: Path, index: int, options: ExtractionOptions):
         import pymupdf
 
-        with tempfile.TemporaryDirectory(prefix="pdf-ocr-") as directory:
+        # Marker/PDFium pode manter o arquivo aberto por alguns milissegundos no Windows.
+        # A falha ao remover o diretório não deve descartar um OCR já concluído; o sistema
+        # operacional ainda limpa seu diretório temporário normalmente.
+        with tempfile.TemporaryDirectory(
+            prefix="pdf-ocr-", ignore_cleanup_errors=True
+        ) as directory:
             output = Path(directory) / "page.pdf"
 
             def make_page() -> None:
@@ -121,10 +128,23 @@ class ExtractionRouter:
                     source.close()
 
             await asyncio.to_thread(make_page)
-            result = await asyncio.wait_for(
-                self.marker.extract(output, options),
-                timeout=self.settings.extraction_timeout_seconds,
-            )
+            try:
+                result = await asyncio.wait_for(
+                    self.easyocr.extract(output, options),
+                    timeout=self.settings.extraction_timeout_seconds,
+                )
+            except Exception as easyocr_error:
+                try:
+                    result = await asyncio.wait_for(
+                        self.marker.extract(output, options),
+                        timeout=self.settings.extraction_timeout_seconds,
+                    )
+                except Exception as marker_error:
+                    raise RuntimeError(
+                        "Todos os provedores OCR falharam: "
+                        f"EasyOCR={type(easyocr_error).__name__}, "
+                        f"Marker={type(marker_error).__name__}"
+                    ) from marker_error
             if not result.pages:
                 raise RuntimeError("OCR retornou uma página vazia")
             return result.pages[0]

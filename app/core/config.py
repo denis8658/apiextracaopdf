@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     ocr_dpi: int = Field(200, ge=72, le=600)
     ocr_default_language: str = "por"
     ocr_max_concurrency: int = Field(1, ge=1)
+    marker_font_path: Path = Path("./tmp/marker/GoNotoCurrent-Regular.ttf")
+    easyocr_model_path: Path = Path("./tmp/easyocr-models")
     max_images_per_document: int = Field(500, ge=0)
     ignore_repeated_images: bool = True
     extraction_worker_poll_seconds: float = Field(2, gt=0)
