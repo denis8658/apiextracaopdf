@@ -84,11 +84,20 @@ async def get_result(
         return PlainTextResponse(result.plain_text, media_type="text/plain; charset=utf-8")
     if format == "markdown":
         return PlainTextResponse(result.markdown, media_type="text/markdown; charset=utf-8")
+    document_payload = dict(result.structured_json)
+    document_payload["plain_text"] = result.plain_text
+    document_payload["markdown"] = result.markdown
+    methods = {
+        page.get("extraction_method")
+        for page in result.structured_json.get("pages", [])
+        if page.get("extraction_method")
+    }
+    document_payload["engine"] = " + ".join(sorted(methods)) or "unknown"
     return JSONResponse(
         {
             "schema_version": result.schema_version,
             "metadata": result.metadata_json,
-            "document": result.structured_json,
+            "document": document_payload,
         }
     )
 

@@ -1,4 +1,5 @@
 import uuid
+from types import SimpleNamespace
 
 from app.api.dependencies import get_document_service
 from app.main import app
@@ -119,3 +120,25 @@ def test_openapi_contains_contract(api_client):
     assert "/api/v1/documents/{document_id}/result" in paths
     assert "/v1/extractions" in paths
     assert "/v1/extractions/{job_id}/events" in paths
+
+
+def test_legacy_json_result_projects_text_for_test_interface(api_client):
+    original = app.dependency_overrides[get_document_service]
+
+    class ResultService:
+        async def get_result(self, document_id):
+            return SimpleNamespace(
+                schema_version="1.0",
+                metadata_json={},
+                plain_text="Página 1\ntexto reconhecido",
+                markdown="# Página 1\n\ntexto reconhecido",
+                structured_json={"schema_version": "1.0", "processing": {}, "pages": []},
+            )
+
+    app.dependency_overrides[get_document_service] = lambda: ResultService()
+    try:
+        response = api_client.get(f"/api/v1/documents/{uuid.uuid4()}/result?format=json")
+    finally:
+        app.dependency_overrides[get_document_service] = original
+    assert response.status_code == 200
+    assert response.json()["document"]["plain_text"] == "Página 1\ntexto reconhecido"

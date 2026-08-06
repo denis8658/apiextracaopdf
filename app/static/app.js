@@ -101,8 +101,14 @@ async function pollDocument(documentId, signal) {
 
 function contentFor(format) {
   if (!state.result) return "";
-  if (format === "text") return state.result.document.plain_text || "";
-  if (format === "markdown") return state.result.document.markdown || "";
+  const document = state.result.document || state.result;
+  const pages = document.pages || [];
+  if (format === "text") {
+    return document.plain_text || pages.map((page) => `Página ${page.page_number}\n${page.plain_text || ""}`).join("\n\n");
+  }
+  if (format === "markdown") {
+    return document.markdown || pages.map((page) => `# Página ${page.page_number}\n\n${page.markdown || ""}`).join("\n\n---\n\n");
+  }
   return JSON.stringify(state.result, null, 2);
 }
 
@@ -113,9 +119,11 @@ function renderResult(format = state.format) {
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-selected", String(active));
   });
-  const pages = state.result?.document?.pages || [];
-  const chars = state.result?.document?.plain_text?.length || 0;
-  const engine = state.result?.document?.engine || "—";
+  const document = state.result?.document || state.result || {};
+  const pages = document.pages || [];
+  const chars = contentFor("text").length;
+  const methods = [...new Set(pages.map((page) => page.extraction_method).filter(Boolean))];
+  const engine = document.engine || methods.join(" + ") || "—";
   elements.resultSummary.innerHTML = `<span>${pages.length} páginas</span><span>${chars.toLocaleString("pt-BR")} caracteres</span><span>motor ${engine}</span>`;
   elements.resultContent.textContent = contentFor(format);
 }
