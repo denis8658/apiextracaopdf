@@ -1,11 +1,63 @@
 import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.base import Base
 from app.db.models import Document, ExtractionJob
-from app.workers.extraction_worker import claim_job
+from app.schemas.extraction import ExtractedPage, ExtractionResult
+from app.workers.extraction_worker import claim_job, public_result
+
+
+def test_public_result_reports_requested_processed_and_skipped_pages():
+    document = SimpleNamespace(
+        original_filename="documento.pdf",
+        content_type="application/pdf",
+        page_count=5,
+        file_size_bytes=100,
+        sha256="a" * 64,
+    )
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        ocr_language="por",
+        started_at=datetime.now(UTC),
+        page_selector="1,3,5",
+        selected_pages_json=[1, 3, 5],
+    )
+    result = ExtractionResult(
+        pages=[
+            ExtractedPage(
+                page_number=1,
+                plain_text="um",
+                markdown="um",
+                blocks=[],
+                has_native_text=True,
+                ocr_used=False,
+            ),
+            ExtractedPage(
+                page_number=5,
+                plain_text="cinco",
+                markdown="cinco",
+                blocks=[],
+                has_native_text=True,
+                ocr_used=False,
+            ),
+        ],
+        plain_text="um\ncinco",
+        markdown="um\ncinco",
+        metadata={},
+        engine="native",
+    )
+    selection = public_result(document, job, result, 10)["page_selection"]
+    assert selection == {
+        "selector": "1,3,5",
+        "requested_pages": [1, 3, 5],
+        "processed_pages": [1, 5],
+        "skipped_pages": [3],
+        "document_page_count": 5,
+    }
 
 
 @pytest.mark.asyncio

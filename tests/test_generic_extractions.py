@@ -63,6 +63,25 @@ def test_generic_endpoint_rejects_unknown_output_format(api_client, sample_pdf):
     assert response.status_code == 422
 
 
+def test_generic_endpoint_accepts_page_selection(api_client, sample_pdf):
+    created = create_job(api_client, sample_pdf, pages="3,1,3")
+    assert created.status_code == 202
+    status = api_client.get(f"/v1/extractions/{created.json()['job_id']}")
+    assert status.status_code == 200
+    assert status.json()["total_pages"] == 2
+
+
+@pytest.mark.parametrize("pages", ["0", "4", "2-1", "x", "1,,2"])
+def test_generic_endpoint_rejects_invalid_page_selection(api_client, sample_pdf, pages):
+    response = create_job(api_client, sample_pdf, pages=pages)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] in {
+        "INVALID_PAGE_SELECTOR",
+        "INVALID_PAGE_RANGE",
+        "PAGE_OUT_OF_RANGE",
+    }
+
+
 def test_generic_jobs_do_not_reuse_hash_and_idempotency_includes_options(api_client, sample_pdf):
     first = create_job(api_client, sample_pdf, output_format="json")
     second = create_job(api_client, sample_pdf, output_format="json")

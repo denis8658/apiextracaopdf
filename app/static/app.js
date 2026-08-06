@@ -14,6 +14,7 @@ const elements = {
   form: $("#uploadForm"), fileInput: $("#pdfFile"), dropzone: $("#dropzone"),
   dropTitle: $("#dropTitle"), dropHint: $("#dropHint"), apiBase: $("#apiBase"),
   engine: $("#engine"), retain: $("#retainOriginal"), submit: $("#submitButton"),
+  pages: $("#pages"),
   status: $("#serviceStatus"), empty: $("#emptyState"), progress: $("#progressCard"),
   caption: $("#processCaption"), documentName: $("#documentName"), documentMeta: $("#documentMeta"),
   statusPill: $("#statusPill"), progressMessage: $("#progressMessage"),
@@ -149,6 +150,7 @@ async function handleSubmit(event) {
   formData.append("engine", elements.engine.value);
   formData.append("output_formats", "text,markdown,json");
   formData.append("retain_original", String(elements.retain.checked));
+  formData.append("pages", elements.pages.value || "all");
 
   try {
     const upload = await request("/api/v1/documents", {

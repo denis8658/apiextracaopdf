@@ -124,11 +124,20 @@ class PublicStatistics(BaseModel):
     ocr_blocks: int
 
 
+class PublicPageSelection(BaseModel):
+    selector: str
+    requested_pages: list[int]
+    processed_pages: list[int]
+    skipped_pages: list[int]
+    document_page_count: int
+
+
 class PublicExtractionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1.0"] = "1.0"
     document: PublicDocumentInfo
     processing: PublicProcessingInfo
+    page_selection: PublicPageSelection | None = None
     pages: list[PublicPage]
     statistics: PublicStatistics

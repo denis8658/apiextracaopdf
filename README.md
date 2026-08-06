@@ -88,6 +88,7 @@ curl -X POST http://localhost:8000/v1/extractions \
   -F 'extract_tables=true' \
   -F 'include_coordinates=true' \
   -F 'image_output=reference' \
+  -F 'pages=1,3,5-10' \
   -F 'processing_mode=async'
 ```
 
@@ -119,7 +120,15 @@ encerra no estado terminal e tem timeout configurável.
 `never`. `image_output` aceita referência temporária, Base64 ou somente metadados. Referências não
 expõem caminhos internos e expiram com o job.
 
-O JSON público contém `schema_version`, metadados do documento, processamento, páginas, blocos,
+`pages` define as páginas processadas e usa numeração iniciada em 1. O padrão é `all`; também
+aceita uma página (`5`), lista (`1,3,8`), intervalo (`10-20`), combinação (`1,3,5-10`), páginas
+ímpares (`odd`) ou pares (`even`). Repetições são removidas e o resultado é ordenado. Seletores
+malformados, fora do documento ou acima de `MAX_SELECTED_PAGES` retornam `422`. Extração nativa,
+OCR, tabelas e imagens executam somente nas páginas selecionadas; o progresso SSE usa esse mesmo
+total.
+
+O JSON público contém `schema_version`, metadados do documento, `page_selection`, processamento,
+páginas, blocos,
 tabelas, imagens e estatísticas. Cada bloco declara `source`: `native`, `ocr`, `image`, `table`,
 `metadata` ou `hybrid`. Tabelas incluem cabeçalhos, linhas, colunas, células, Markdown, método e
 confiança. Imagens incluem hash, classificação determinística, coordenadas e associação textual.
@@ -142,7 +151,7 @@ relevantes deixam rastreabilidade em metadados e warnings.
 
 Consulte `.env.example`. Variáveis principais:
 
-- `DATABASE_URL`, `STORAGE_PATH`, `MAX_PDF_SIZE_MB`, `MAX_PDF_PAGES`.
+- `DATABASE_URL`, `STORAGE_PATH`, `MAX_PDF_SIZE_MB`, `MAX_PDF_PAGES`, `MAX_SELECTED_PAGES`.
 - `PDF_NATIVE_MIN_CHARS_PER_PAGE`, `PDF_NATIVE_MIN_WORDS_PER_PAGE`.
 - `PDF_NATIVE_MAX_INVALID_CHAR_RATIO`, `OCR_DPI`, `OCR_DEFAULT_LANGUAGE`.
 - `OCR_MAX_CONCURRENCY`, `MAX_IMAGES_PER_DOCUMENT`, `IGNORE_REPEATED_IMAGES`.

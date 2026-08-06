@@ -5,9 +5,11 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
+from app.core.errors import AppError
 from app.extraction.easyocr_engine import EasyOCRExtractionEngine
 from app.extraction.marker_engine import html_to_text
 from app.extraction.normalizer import normalize_result, normalize_text
+from app.extraction.page_selection import parse_page_selector
 from app.extraction.pymupdf_engine import PyMuPDFExtractionEngine
 from app.extraction.router import ExtractionRouter
 from app.extraction.validators import inspect_pdf
@@ -30,6 +32,63 @@ async def test_native_extraction_preserves_pages(tmp_path, sample_pdf):
     assert [page.page_number for page in result.pages] == [1, 2, 3]
     assert "Orçamento 1790" in result.plain_text
     assert all(page.blocks for page in result.pages)
+
+
+@pytest.mark.parametrize(
+    ("selector", "total", "expected"),
+    [
+        ("all", 5, [1, 2, 3, 4, 5]),
+        ("5", 5, [5]),
+        ("1,3,5", 5, [1, 3, 5]),
+        ("2-5", 5, [2, 3, 4, 5]),
+        ("1,3,3,2-4", 5, [1, 2, 3, 4]),
+        ("odd", 6, [1, 3, 5]),
+        ("even", 6, [2, 4, 6]),
+    ],
+)
+def test_page_selector_parses_deduplicates_and_orders(selector, total, expected):
+    assert parse_page_selector(selector, total, 100) == expected
+
+
+@pytest.mark.parametrize(
+    ("selector", "code"),
+    [
+        ("0", "INVALID_PAGE_SELECTOR"),
+        ("4", "PAGE_OUT_OF_RANGE"),
+        ("3-1", "INVALID_PAGE_RANGE"),
+        ("one", "INVALID_PAGE_SELECTOR"),
+        ("1,,2", "INVALID_PAGE_SELECTOR"),
+        ("1-", "INVALID_PAGE_SELECTOR"),
+    ],
+)
+def test_page_selector_rejects_invalid_values(selector, code):
+    with pytest.raises(AppError) as captured:
+        parse_page_selector(selector, 3, 100)
+    assert captured.value.code == code
+
+
+def test_page_selector_enforces_configured_limit():
+    with pytest.raises(AppError) as captured:
+        parse_page_selector("all", 4, 3)
+    assert captured.value.code == "PAGE_SELECTION_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_native_extraction_processes_only_selected_pages(tmp_path, sample_pdf):
+    path = tmp_path / "selected.pdf"
+    path.write_bytes(sample_pdf)
+    result = normalize_result(
+        await PyMuPDFExtractionEngine().extract(
+            path,
+            ExtractionOptions(
+                engine="native", pages="1,3", selected_pages=[1, 3]
+            ),
+        )
+    )
+    assert [page.page_number for page in result.pages] == [1, 3]
+    assert "página 1" in result.plain_text
+    assert "página 2" not in result.plain_text
+    assert "página 3" in result.markdown
 
 
 @pytest.mark.asyncio
@@ -103,11 +162,20 @@ async def test_auto_ocr_replaces_only_deficient_page(tmp_path, monkeypatch):
 
     router.native = NativeFake()
     monkeypatch.setattr(router, "_ocr_page", fake_ocr)
-    result = await router.extract(tmp_path / "unused.pdf", ExtractionOptions())
+    events = []
+
+    async def progress(event_type, data):
+        events.append((event_type, data))
+
+    result = await router.extract(tmp_path / "unused.pdf", ExtractionOptions(), progress)
     assert result.result.pages[0].extraction_method == "native"
     assert result.result.pages[1].extraction_method == "ocr"
     assert result.result.pages[1].blocks[0].source == "ocr"
     assert result.result.engine == "hybrid"
+    processed = [data for event, data in events if event == "page.processed"]
+    assert sorted(item["page"] for item in processed) == [1, 2]
+    assert sorted(item["completed_pages"] for item in processed) == [1, 2]
+    assert all(item["selected_total"] == 2 for item in processed)
 
 
 @pytest.mark.asyncio

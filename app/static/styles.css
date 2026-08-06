@@ -72,8 +72,8 @@ main { padding: 80px 0 28px; }
 
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
 .field-grid label > span { display: block; margin: 0 0 7px 3px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-select, input[type="url"] { width: 100%; min-height: 47px; padding: 0 13px; border: 1px solid var(--line); border-radius: 12px; outline: none; background: rgba(255,255,255,.72); color: var(--ink); }
-select:focus, input[type="url"]:focus { border-color: var(--deep); box-shadow: 0 0 0 3px rgba(18,63,56,.08); }
+select, input[type="url"], input[type="text"] { width: 100%; min-height: 47px; padding: 0 13px; border: 1px solid var(--line); border-radius: 12px; outline: none; background: rgba(255,255,255,.72); color: var(--ink); }
+select:focus, input[type="url"]:focus, input[type="text"]:focus { border-color: var(--deep); box-shadow: 0 0 0 3px rgba(18,63,56,.08); }
 .check-row { display: flex; gap: 10px; align-items: center; margin: 18px 2px; color: var(--muted); font-size: 13px; cursor: pointer; }
 .check-row input { accent-color: var(--deep); }
 

@@ -33,6 +33,7 @@ async def create_extraction(
     include_coordinates: Annotated[bool, Form()] = True,
     image_output: Annotated[Literal["reference", "base64", "metadata"], Form()] = "reference",
     processing_mode: Annotated[Literal["async"], Form()] = "async",
+    pages: Annotated[str, Form(min_length=1, max_length=255)] = "all",
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> ExtractionAccepted:
     options = ExtractionOptions(
@@ -44,6 +45,7 @@ async def create_extraction(
         extract_tables=extract_tables,
         include_coordinates=include_coordinates,
         image_output=image_output,
+        pages=pages,
     )
     created = await service.create(file, options, idempotency_key)
     job, document = created.job, created.document

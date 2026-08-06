@@ -21,6 +21,8 @@ class ExtractionOptions(BaseModel):
     include_coordinates: bool = True
     ignore_decorative_images: bool = True
     image_output: Literal["reference", "base64", "metadata"] = "reference"
+    pages: str = "all"
+    selected_pages: list[int] = Field(default_factory=list)
 
 
 class ExtractedBlock(BaseModel):

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     storage_path: Path = Path("./storage")
     max_pdf_size_mb: int = Field(50, gt=0)
     max_pdf_pages: int = Field(500, gt=0)
+    max_selected_pages: int = Field(500, gt=0)
     upload_chunk_size_bytes: int = Field(1_048_576, ge=4096)
     default_extraction_engine: Literal["auto", "native", "marker"] = "auto"
     pdf_native_min_chars_per_page: int = Field(80, ge=0)

@@ -35,9 +35,17 @@ async def upload_document(
     engine: Annotated[Literal["auto", "native", "marker"], Form()] = "auto",
     output_formats: Annotated[str, Form()] = "text,markdown,json",
     retain_original: Annotated[bool, Form()] = True,
+    pages: Annotated[str, Form(min_length=1, max_length=255)] = "all",
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> UploadResponse:
-    created = await service.upload(file, engine, output_formats, retain_original, idempotency_key)
+    created = await service.upload(
+        file,
+        engine,
+        output_formats,
+        retain_original,
+        idempotency_key,
+        page_selector=pages,
+    )
     return service.upload_response(created)
 
 

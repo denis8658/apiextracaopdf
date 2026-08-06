@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import Settings
 from app.core.errors import AppError, pdf_error
 from app.db.models import Document, DocumentPage, DocumentResult, ExtractionJob
+from app.extraction.page_selection import parse_page_selector
 from app.extraction.validators import inspect_pdf, validate_and_stream
 from app.schemas.api import UploadResponse
 from app.schemas.extraction import ExtractionOptions
@@ -63,10 +64,14 @@ class DocumentService:
         options: ExtractionOptions | None = None,
         temporary: bool = False,
         reuse_by_hash: bool = True,
+        page_selector: str = "all",
     ) -> CreatedUpload:
         formats = parse_output_formats(output_formats)
         if engine not in {"auto", "native", "marker"}:
             raise AppError("invalid_engine", "Motor de extração inválido.", 422)
+        options = options or ExtractionOptions(
+            engine=engine, output_formats=formats, pages=page_selector
+        )
         validated, chunks = await validate_and_stream(file, self.settings)
         try:
             path = await self.storage.save(validated.storage_key, chunks)
@@ -75,10 +80,16 @@ class DocumentService:
             await self.storage.delete(validated.storage_key)
             raise
 
-        request_sha256 = validated.sha256
-        if options is not None:
-            fingerprint = f"{validated.sha256}:{options.model_dump_json()}".encode()
-            request_sha256 = hashlib.sha256(fingerprint).hexdigest()
+        try:
+            options.selected_pages = parse_page_selector(
+                options.pages, page_count, self.settings.max_selected_pages
+            )
+        except Exception:
+            await self.storage.delete(validated.storage_key)
+            raise
+
+        fingerprint = f"{validated.sha256}:{options.model_dump_json()}".encode()
+        request_sha256 = hashlib.sha256(fingerprint).hexdigest()
         existing_job = None
         if idempotency_key:
             existing_job = await self.session.scalar(
@@ -92,18 +103,22 @@ class DocumentService:
                     raise pdf_error("idempotency_conflict", 409)
                 return CreatedUpload(existing_job.document, existing_job, True)
 
-        duplicate = None
+        duplicate_job = None
         if reuse_by_hash:
-            duplicate = await self.session.scalar(
-                select(Document)
-                .options(selectinload(Document.jobs))
-                .where(Document.sha256 == validated.sha256, Document.deleted_at.is_(None))
-                .order_by(Document.created_at.desc())
+            duplicate_job = await self.session.scalar(
+                select(ExtractionJob)
+                .join(Document, ExtractionJob.document_id == Document.id)
+                .options(selectinload(ExtractionJob.document))
+                .where(
+                    Document.sha256 == validated.sha256,
+                    Document.deleted_at.is_(None),
+                    ExtractionJob.request_sha256 == request_sha256,
+                )
+                .order_by(ExtractionJob.created_at.desc())
             )
-        if duplicate and duplicate.jobs:
+        if duplicate_job:
             await self.storage.delete(validated.storage_key)
-            job = max(duplicate.jobs, key=lambda item: item.created_at)
-            return CreatedUpload(duplicate, job, True)
+            return CreatedUpload(duplicate_job.document, duplicate_job, True)
 
         document = Document(
             original_filename=validated.original_filename,
@@ -123,7 +138,6 @@ class DocumentService:
                 else None
             ),
         )
-        options = options or ExtractionOptions(engine=engine, output_formats=formats)
         job = ExtractionJob(
             document=document,
             status="queued",
@@ -132,7 +146,7 @@ class DocumentService:
             max_attempts=self.settings.extraction_max_attempts,
             idempotency_key=idempotency_key,
             request_sha256=request_sha256,
-            total_pages=page_count,
+            total_pages=len(options.selected_pages),
             output_format=options.output_format,
             ocr_mode=options.ocr_mode,
             ocr_language=options.ocr_language,
@@ -143,6 +157,8 @@ class DocumentService:
             processing_mode="async",
             current_stage="queued",
             warnings_json=[],
+            page_selector=options.pages,
+            selected_pages_json=options.selected_pages,
         )
         self.session.add_all([document, job])
         try:
@@ -267,6 +283,8 @@ class DocumentService:
             max_attempts=self.settings.extraction_max_attempts,
             request_sha256=document.sha256,
             total_pages=document.page_count,
+            page_selector="all",
+            selected_pages_json=list(range(1, (document.page_count or 0) + 1)),
         )
         document.status = "queued"
         self.session.add(job)

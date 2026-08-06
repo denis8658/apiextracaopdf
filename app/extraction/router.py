@@ -45,22 +45,48 @@ class ExtractionRouter:
             targets = [
                 index for index in range(len(native.pages)) if self._needs_ocr(native, index)
             ]
+        selected_total = len(native.pages)
+        completed_pages = 0
+        progress_lock = asyncio.Lock()
+
+        async def page_completed(index: int) -> None:
+            nonlocal completed_pages
+            if not progress:
+                return
+            async with progress_lock:
+                completed_pages += 1
+                await progress(
+                    "page.processed",
+                    {
+                        "page": native.pages[index].page_number,
+                        "method": native.pages[index].extraction_method,
+                        "completed_pages": completed_pages,
+                        "selected_total": selected_total,
+                    },
+                )
+
         if mode == "never" or not targets:
+            for index in range(selected_total):
+                await page_completed(index)
             return RoutedResult(native, "OCR desativado ou texto nativo suficiente", detected)
 
         semaphore = asyncio.Semaphore(max(1, self.settings.ocr_max_concurrency))
 
         async def replace(index: int) -> None:
             async with semaphore:
-                page_number = index + 1
+                original = native.pages[index]
+                page_number = original.page_number
                 if progress:
-                    await progress("ocr.started", {"page": page_number})
+                    await progress(
+                        "ocr.started",
+                        {"page": page_number, "selected_total": selected_total},
+                    )
                 try:
-                    ocr_page = await self._ocr_page(path, index, options)
-                    original = native.pages[index]
+                    ocr_page = await self._ocr_page(path, page_number - 1, options)
                     ocr_page.page_number = page_number
-                    for block in ocr_page.blocks:
+                    for block_index, block in enumerate(ocr_page.blocks, 1):
                         block.page_number = page_number
+                        block.block_id = f"p{page_number}-ocr-{block_index}"
                         block.source = "ocr"
                     ocr_page.images = original.images
                     ocr_page.tables = original.tables
@@ -81,14 +107,12 @@ class ExtractionRouter:
                     native.pages[index].warnings.append(
                         f"OCR não pôde processar esta página: {type(exc).__name__}"
                     )
-                if progress:
-                    await progress(
-                        "page.processed",
-                        {"page": page_number, "method": native.pages[index].extraction_method},
-                    )
+                await page_completed(index)
 
+        for index in sorted(set(range(selected_total)) - set(targets)):
+            await page_completed(index)
         await asyncio.gather(*(replace(index) for index in targets))
-        native.engine = "hybrid" if len(targets) < len(native.pages) else "marker"
+        native.engine = "hybrid" if len(targets) < len(native.pages) else "easyocr"
         return RoutedResult(native, f"OCR seletivo aplicado em {len(targets)} página(s)", detected)
 
     def _needs_ocr(self, result: ExtractionResult, index: int) -> bool:

@@ -21,6 +21,7 @@ def test_test_interface_is_served(api_client):
     assert response.status_code == 200
     assert "Leitor" in response.text
     assert "/ui/app.js" in response.text
+    assert 'id="pages"' in response.text
 
 
 def test_cors_preflight_allowed(api_client):
@@ -59,6 +60,19 @@ def test_upload_valid_pdf_and_idempotency(api_client, sample_pdf):
     assert second.status_code == 202
     assert first.json()["document_id"] == second.json()["document_id"]
     assert first.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_test_interface_upload_honors_page_selection(api_client, sample_pdf):
+    response = api_client.post(
+        "/api/v1/documents",
+        files={"file": ("documento.pdf", sample_pdf, "application/pdf")},
+        data={"engine": "native", "pages": "odd"},
+        headers={"Idempotency-Key": "selected-pages"},
+    )
+    assert response.status_code == 202
+    status = api_client.get(f"/api/v1/documents/{response.json()['document_id']}")
+    assert status.status_code == 200
+    assert status.json()["progress"]["total_pages"] == 2
 
 
 def test_upload_validation_errors_have_standard_shape(api_client):

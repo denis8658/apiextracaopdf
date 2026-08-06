@@ -52,15 +52,19 @@ class PyMuPDFExtractionEngine:
 
         document = pymupdf.open(file_path)
         try:
+            selected_pages = options.selected_pages or list(range(1, document.page_count + 1))
+            page_indices = [page_number - 1 for page_number in selected_pages]
             image_counts = (
-                self._image_hash_counts(document) if options.extract_images else Counter()
+                self._image_hash_counts(document, page_indices)
+                if options.extract_images
+                else Counter()
             )
             pages: list[ExtractedPage] = []
             char_counts: list[int] = []
             word_counts: list[int] = []
             invalid_ratios: list[float] = []
             image_total = 0
-            for page_index in range(document.page_count):
+            for page_index in page_indices:
                 page = document[page_index]
                 page_number = page_index + 1
                 warnings: list[str] = []
@@ -110,6 +114,7 @@ class PyMuPDFExtractionEngine:
             metadata.update(
                 {
                     "page_count": document.page_count,
+                    "selected_pages": selected_pages,
                     "native_char_counts": char_counts,
                     "native_word_counts": word_counts,
                     "native_invalid_char_ratios": invalid_ratios,
@@ -127,9 +132,10 @@ class PyMuPDFExtractionEngine:
             document.close()
 
     @staticmethod
-    def _image_hash_counts(document) -> Counter[str]:
+    def _image_hash_counts(document, page_indices: list[int]) -> Counter[str]:
         hashes: Counter[str] = Counter()
-        for page in document:
+        for page_index in page_indices:
+            page = document[page_index]
             for image in page.get_images(full=True):
                 try:
                     raw = document.extract_image(image[0]).get("image", b"")

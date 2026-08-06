@@ -96,6 +96,7 @@ def _bbox(value):
 
 
 def public_result(document, job, result, duration_ms: int) -> dict:
+    requested_pages = job.selected_pages_json or list(range(1, (document.page_count or 0) + 1))
     pages = []
     for page in result.pages:
         pages.append(
@@ -166,7 +167,7 @@ def public_result(document, job, result, duration_ms: int) -> dict:
         "document": {
             "filename": document.original_filename,
             "mime_type": document.content_type,
-            "page_count": len(result.pages),
+            "page_count": document.page_count,
             "file_size": document.file_size_bytes,
             "document_hash": document.sha256,
             "language": job.ocr_language,
@@ -184,6 +185,15 @@ def public_result(document, job, result, duration_ms: int) -> dict:
             "ocr_pages": methods.count("ocr"),
             "hybrid_pages": methods.count("hybrid"),
             "warnings": [warning for page in result.pages for warning in page.warnings],
+        },
+        "page_selection": {
+            "selector": job.page_selector,
+            "requested_pages": requested_pages,
+            "processed_pages": [page.page_number for page in result.pages],
+            "skipped_pages": sorted(
+                set(requested_pages) - {page.page_number for page in result.pages}
+            ),
+            "document_page_count": document.page_count,
         },
         "pages": pages,
         "statistics": {
@@ -248,14 +258,13 @@ async def persist_success(session, job_id, routed, duration_ms: int, storage) ->
         job.engine_used = result.engine
         job.engine_selection_reason = routed.reason
         job.progress_percent = 100
-        job.current_page = len(result.pages)
-        job.total_pages = len(result.pages)
+        job.current_page = result.pages[-1].page_number if result.pages else None
+        job.total_pages = len(payload["page_selection"]["requested_pages"])
         job.completed_at = now
         job.processing_duration_ms = duration_ms
         job.engine_version = result.engine_version
         job.warnings_json = payload["processing"]["warnings"]
         document.status = "completed"
-        document.page_count = len(result.pages)
         document.detected_pdf_type = routed.detected_pdf_type
         document.extraction_engine = result.engine
         add_event(
@@ -310,10 +319,13 @@ async def process_job(job: ExtractionJob) -> None:
             if not current or current.status == "cancelled":
                 raise asyncio.CancelledError
             page = data.get("page")
-            if page:
-                current.current_page = page
+            completed_pages = data.get("completed_pages")
+            selected_total = data.get("selected_total") or current.total_pages or 1
+            if page is not None:
+                current.current_page = int(page)
+            if completed_pages is not None:
                 current.progress_percent = min(
-                    95, int(page / max(1, current.total_pages or 1) * 90)
+                    95, int(int(completed_pages) / max(1, int(selected_total)) * 95)
                 )
             current.current_stage = event_type
             add_event(
@@ -326,6 +338,9 @@ async def process_job(job: ExtractionJob) -> None:
             if not document:
                 raise RuntimeError("document record missing")
             path = await storage.open(document.storage_key)
+        selected_pages = job.selected_pages_json or list(
+            range(1, (document.page_count or 0) + 1)
+        )
         options = ExtractionOptions(
             engine=job.engine_requested,
             output_formats=job.requested_formats,
@@ -337,6 +352,8 @@ async def process_job(job: ExtractionJob) -> None:
             extract_tables=job.extract_tables,
             include_coordinates=job.include_coordinates,
             image_output=job.image_output,
+            pages=job.page_selector,
+            selected_pages=selected_pages,
         )
         routed = await asyncio.wait_for(
             router.extract(path, options, progress), timeout=settings.extraction_timeout_seconds
