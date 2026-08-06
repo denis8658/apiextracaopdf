@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.services.document_service import DocumentService
+from app.services.extraction_service import ExtractionService
 from app.services.order_structuring_service import OrderStructuringService
 from app.storage import LocalStorageBackend
 
@@ -22,3 +23,11 @@ def get_order_structuring_service(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> OrderStructuringService:
     return OrderStructuringService(session, settings)
+
+
+def get_extraction_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ExtractionService:
+    storage = LocalStorageBackend(settings.storage_path)
+    return ExtractionService(session, storage, settings)

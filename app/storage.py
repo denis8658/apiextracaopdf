@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +12,7 @@ class StorageBackend(Protocol):
     async def open(self, key: str) -> Path: ...
     async def delete(self, key: str) -> None: ...
     async def exists(self, key: str) -> bool: ...
+    async def delete_prefix(self, prefix: str) -> None: ...
 
 
 class LocalStorageBackend:
@@ -49,3 +51,8 @@ class LocalStorageBackend:
 
     async def exists(self, key: str) -> bool:
         return await asyncio.to_thread(self._path(key).is_file)
+
+    async def delete_prefix(self, prefix: str) -> None:
+        path = self._path(prefix)
+        if await asyncio.to_thread(path.is_dir):
+            await asyncio.to_thread(shutil.rmtree, path)

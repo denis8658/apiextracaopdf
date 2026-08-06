@@ -18,6 +18,7 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> Health
 
 
 @router.get("/health/ready", response_model=HealthResponse)
+@router.get("/ready", response_model=HealthResponse)
 async def ready(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],

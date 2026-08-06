@@ -1,7 +1,8 @@
+import hashlib
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import UploadFile
 from sqlalchemy import Select, func, select
@@ -13,6 +14,7 @@ from app.core.errors import AppError, pdf_error
 from app.db.models import Document, DocumentPage, DocumentResult, ExtractionJob
 from app.extraction.validators import inspect_pdf, validate_and_stream
 from app.schemas.api import UploadResponse
+from app.schemas.extraction import ExtractionOptions
 from app.storage import StorageBackend
 
 
@@ -58,6 +60,9 @@ class DocumentService:
         output_formats: str | list[str],
         retain_original: bool,
         idempotency_key: str | None,
+        options: ExtractionOptions | None = None,
+        temporary: bool = False,
+        reuse_by_hash: bool = True,
     ) -> CreatedUpload:
         formats = parse_output_formats(output_formats)
         if engine not in {"auto", "native", "marker"}:
@@ -70,6 +75,10 @@ class DocumentService:
             await self.storage.delete(validated.storage_key)
             raise
 
+        request_sha256 = validated.sha256
+        if options is not None:
+            fingerprint = f"{validated.sha256}:{options.model_dump_json()}".encode()
+            request_sha256 = hashlib.sha256(fingerprint).hexdigest()
         existing_job = None
         if idempotency_key:
             existing_job = await self.session.scalar(
@@ -79,16 +88,18 @@ class DocumentService:
             )
             if existing_job:
                 await self.storage.delete(validated.storage_key)
-                if existing_job.request_sha256 != validated.sha256:
+                if existing_job.request_sha256 != request_sha256:
                     raise pdf_error("idempotency_conflict", 409)
                 return CreatedUpload(existing_job.document, existing_job, True)
 
-        duplicate = await self.session.scalar(
-            select(Document)
-            .options(selectinload(Document.jobs))
-            .where(Document.sha256 == validated.sha256, Document.deleted_at.is_(None))
-            .order_by(Document.created_at.desc())
-        )
+        duplicate = None
+        if reuse_by_hash:
+            duplicate = await self.session.scalar(
+                select(Document)
+                .options(selectinload(Document.jobs))
+                .where(Document.sha256 == validated.sha256, Document.deleted_at.is_(None))
+                .order_by(Document.created_at.desc())
+            )
         if duplicate and duplicate.jobs:
             await self.storage.delete(validated.storage_key)
             job = max(duplicate.jobs, key=lambda item: item.created_at)
@@ -106,7 +117,13 @@ class DocumentService:
             status="queued",
             detected_pdf_type="unknown",
             retain_original=retain_original,
+            expires_at=(
+                utcnow() + timedelta(seconds=self.settings.extraction_job_ttl_seconds)
+                if temporary
+                else None
+            ),
         )
+        options = options or ExtractionOptions(engine=engine, output_formats=formats)
         job = ExtractionJob(
             document=document,
             status="queued",
@@ -114,8 +131,18 @@ class DocumentService:
             requested_formats=formats,
             max_attempts=self.settings.extraction_max_attempts,
             idempotency_key=idempotency_key,
-            request_sha256=validated.sha256,
+            request_sha256=request_sha256,
             total_pages=page_count,
+            output_format=options.output_format,
+            ocr_mode=options.ocr_mode,
+            ocr_language=options.ocr_language,
+            extract_images=options.extract_images,
+            extract_tables=options.extract_tables,
+            include_coordinates=options.include_coordinates,
+            image_output=options.image_output,
+            processing_mode="async",
+            current_stage="queued",
+            warnings_json=[],
         )
         self.session.add_all([document, job])
         try:

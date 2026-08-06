@@ -117,6 +117,5 @@ def test_openapi_contains_contract(api_client):
     paths = response.json()["paths"]
     assert "/api/v1/documents" in paths
     assert "/api/v1/documents/{document_id}/result" in paths
-    assert "/api/v1/documents/{document_id}/structure/order" in paths
-    assert "/api/v1/structure-jobs/{job_id}/result" in paths
-    assert "/api/v1/orders/{order_id}" in paths
+    assert "/v1/extractions" in paths
+    assert "/v1/extractions/{job_id}/events" in paths

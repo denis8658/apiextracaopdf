@@ -21,9 +21,21 @@ class Settings(BaseSettings):
     upload_chunk_size_bytes: int = Field(1_048_576, ge=4096)
     default_extraction_engine: Literal["auto", "native", "marker"] = "auto"
     pdf_native_min_chars_per_page: int = Field(80, ge=0)
+    pdf_native_min_words_per_page: int = Field(5, ge=0)
+    pdf_native_max_invalid_char_ratio: float = Field(0.10, ge=0, le=1)
     pdf_native_min_text_page_ratio: float = Field(0.70, ge=0, le=1)
+    ocr_dpi: int = Field(200, ge=72, le=600)
+    ocr_default_language: str = "por"
+    ocr_max_concurrency: int = Field(1, ge=1)
+    max_images_per_document: int = Field(500, ge=0)
+    ignore_repeated_images: bool = True
     extraction_worker_poll_seconds: float = Field(2, gt=0)
     extraction_max_attempts: int = Field(3, ge=1)
+    extraction_timeout_seconds: int = Field(900, gt=0)
+    extraction_job_ttl_seconds: int = Field(3600, ge=60)
+    extraction_cleanup_interval_seconds: float = Field(60, gt=0)
+    extraction_sse_heartbeat_seconds: float = Field(15, gt=0)
+    extraction_sse_timeout_seconds: int = Field(600, gt=0)
     structuring_provider: Literal["openai"] = "openai"
     structuring_model: str = "gpt-5.6-sol"
     openai_api_key: SecretStr | None = None

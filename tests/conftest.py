@@ -6,11 +6,12 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.api.dependencies import get_document_service
+from app.api.dependencies import get_document_service, get_extraction_service
 from app.core.config import Settings
 from app.db.base import Base
 from app.main import app
 from app.services.document_service import DocumentService
+from app.services.extraction_service import ExtractionService
 from app.storage import LocalStorageBackend
 
 
@@ -47,7 +48,13 @@ async def api_client(tmp_path) -> AsyncIterator[TestClient]:
         async with sessions() as session:
             yield DocumentService(session, LocalStorageBackend(settings.storage_path), settings)
 
+    async def extraction_service_override() -> AsyncIterator[ExtractionService]:
+        async with sessions() as session:
+            storage = LocalStorageBackend(settings.storage_path)
+            yield ExtractionService(session, storage, settings)
+
     app.dependency_overrides[get_document_service] = service_override
+    app.dependency_overrides[get_extraction_service] = extraction_service_override
     with TestClient(app, raise_server_exceptions=False) as client:
         yield client
     app.dependency_overrides.clear()

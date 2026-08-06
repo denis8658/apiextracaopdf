@@ -32,14 +32,22 @@ class MarkerExtractionEngine:
     name = "marker"
 
     async def extract(self, file_path: Path, options: ExtractionOptions) -> ExtractionResult:
-        return await asyncio.to_thread(self._extract_sync, file_path)
+        return await asyncio.to_thread(self._extract_sync, file_path, options)
 
-    def _extract_sync(self, file_path: Path) -> ExtractionResult:
+    def _extract_sync(self, file_path: Path, options: ExtractionOptions) -> ExtractionResult:
         from marker.config.parser import ConfigParser
         from marker.converters.pdf import PdfConverter
         from marker.models import create_model_dict
 
-        parser = ConfigParser({"output_format": "json", "mode": "fast"})
+        parser = ConfigParser(
+            {
+                "output_format": "json",
+                "mode": "balanced",
+                "force_ocr": True,
+                "ocr_full_page": True,
+                "highres_image_dpi": options.ocr_dpi,
+            }
+        )
         converter = PdfConverter(
             config=parser.generate_config_dict(),
             artifact_dict=create_model_dict(),
@@ -82,7 +90,12 @@ class MarkerExtractionEngine:
             plain_text="",
             markdown="",
             pages=pages,
-            metadata={"marker_metadata": raw.get("metadata", {}), "images": []},
+            metadata={
+                "marker_metadata": raw.get("metadata", {}),
+                "images": [],
+                "ocr_language_requested": options.ocr_language,
+                "ocr_dpi": options.ocr_dpi,
+            },
             engine=self.name,
             engine_version=version("marker-pdf"),
         )
@@ -110,11 +123,26 @@ class MarkerExtractionEngine:
                     text=node.get("text"),
                     html=node.get("html"),
                     bbox=self._bbox(node.get("polygon") or node.get("bbox")),
+                    source="ocr",
+                    confidence=self._confidence(node),
+                    reading_order=len(blocks) + 1,
                     metadata=node.get("metadata") or {},
                 )
             )
         for child in children:
             self._flatten(child, page_number, blocks, texts, fragments)
+
+    @staticmethod
+    def _confidence(node: dict[str, Any]) -> float | None:
+        metadata = node.get("metadata") or {}
+        value = metadata.get("confidence") or metadata.get("ocr_confidence")
+        if value is None:
+            return None
+        try:
+            number = float(value)
+            return max(0.0, min(1.0, number / 100 if number > 1 else number))
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _bbox(value: Any) -> list[float] | None:

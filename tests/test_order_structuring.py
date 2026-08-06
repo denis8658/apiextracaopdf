@@ -10,13 +10,13 @@ from app.api.dependencies import get_order_structuring_service
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.models import Customer, Document, DocumentPage, DocumentResult, Order, OrderItem
-from app.main import app
 from app.schemas.order_structuring import (
     CustomerExtraction,
     OrderItemExtraction,
     StructuredOrderExtraction,
 )
 from app.services.order_structuring_service import OrderStructuringService
+from app.structure_main import app
 from app.structuring.base import ProviderResult
 from app.structuring.consistency import validate_consistency
 from app.structuring.normalizer import (

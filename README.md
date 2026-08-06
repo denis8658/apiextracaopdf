@@ -1,426 +1,193 @@
-# API de Extração Documental de PDFs
+# API genérica de extração de PDFs
 
-API FastAPI assíncrona para receber PDFs, persistir metadados no PostgreSQL e extrair texto,
-Markdown e JSON por página. O upload responde `202`; um worker separado captura trabalhos com
-`FOR UPDATE SKIP LOCKED`, evitando que duas instâncias processem o mesmo item.
+Serviço FastAPI assíncrono que recebe PDFs e entrega texto, Markdown ou JSON versionado. A API
+tenta leitura nativa primeiro e aciona OCR somente nas páginas cuja camada de texto é ausente ou
+insuficiente. Texto, tabelas, imagens, coordenadas, ordem de leitura e origem permanecem
+rastreáveis.
 
-O leitor representa fielmente o documento. Depois da extração bruta, o módulo opcional de
-estruturação interpreta cliente, pedido e itens com saída validada. Ele não cria planos de corte e
-não inventa campos ausentes.
+Produção: `https://apiextracaopdf-production.up.railway.app`
 
-## Arquitetura e fluxo
+- Interface: `/ui/`
+- OpenAPI: `/docs`
+- Vivacidade: `/health`
+- Prontidão: `/ready`
+
+## Responsabilidade e arquitetura
 
 ```text
-Base44 -> API -> armazenamento local/volume
-             -> PostgreSQL (documento + job queued)
-Worker -> PostgreSQL (claim exclusivo) -> PyMuPDF ou Marker -> páginas + resultado
-Base44 -> polling de status -> resultado
-Structure Worker -> conteúdo extraído -> OpenAI/Pydantic -> preview validado -> cliente/pedido/itens
+cliente -> FastAPI -> PDF temporário + PostgreSQL (job/eventos com TTL)
+                         |
+worker -> PyMuPDF nativo por página -> heurística -> Marker OCR nas páginas necessárias
+                         |
+              normalização -> texto/Markdown/JSON -> SSE + resultado temporário
+                         |
+              limpeza por TTL -> remove PDF, imagens, páginas e resultado
 ```
 
-- `app/api`: rotas HTTP, saúde e dependências.
-- `app/services`: regras de upload, idempotência, consulta e exclusão.
-- `app/extraction`: validação, normalização, motores e roteamento.
-- `app/db`: SQLAlchemy 2 assíncrono e modelos.
-- `app/workers`: worker persistente baseado no PostgreSQL.
-- `alembic`: migração inicial, tabelas, relacionamentos e índices.
+A extração é genérica e não cria clientes, pedidos ou outros registros de negócio. O módulo legado
+de estruturação foi isolado em `app.structure_main`/`app.structure_combined`; ele não é montado nem
+executado pelo serviço padrão. As rotas antigas `/api/v1` de documentos foram mantidas por
+compatibilidade, mas novas integrações devem usar `/v1/extractions`.
 
-O modo `auto` primeiro usa PyMuPDF. Uma página é considerada textualmente suficiente quando tem
-ao menos `PDF_NATIVE_MIN_CHARS_PER_PAGE`; o documento usa o motor nativo quando a razão dessas
-páginas alcança `PDF_NATIVE_MIN_TEXT_PAGE_RATIO`. A decisão e sua razão ficam registradas no job.
-O PDF de teste `5931701f3_Oramento-1790-SEMPREO.pdf` tem 3 páginas, texto nativo e imagens técnicas.
-Com os limites padrão, as contagens são 2.983, 3.156 e 666 caracteres e o modo `auto` seleciona
-corretamente o motor nativo.
+Principais módulos:
 
-## Instalação local
+- `app/api/v1/extractions.py`: contrato HTTP, status, resultado, SSE e cancelamento.
+- `app/services/extraction_service.py`: aplicação, isolamento do job e armazenamento temporário.
+- `app/extraction`: validação, PyMuPDF, Marker, roteamento híbrido e normalização.
+- `app/workers/extraction_worker.py`: claim concorrente, progresso, resultado e limpeza.
+- `app/storage.py`: interface desacoplada e backend local protegido contra path traversal.
+- `app/schemas/extraction_api.py`: schema JSON público `1.0`.
 
-Requer Python 3.12. PostgreSQL é obrigatório para produção e para concorrência entre workers.
+PostgreSQL com `FOR UPDATE SKIP LOCKED` permite vários workers. O backend local exige volume
+compartilhado e, portanto, limita escalabilidade horizontal da API; S3/MinIO é a evolução prevista
+pela interface de storage.
 
-### Teste local imediato no Windows, sem PostgreSQL
+## Instalação e execução
 
-O arquivo `.env` local (ignorado pelo Git) usa SQLite e permite testar com **um único worker**.
-Não use esse perfil com múltiplos workers: SQLite não oferece a semântica PostgreSQL de
-`FOR UPDATE SKIP LOCKED`.
-
-Abra três terminais no diretório do projeto. No primeiro, aplique a migração:
+Requer Python 3.12.
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+Copy-Item .env.example .env
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-No segundo, mantenha a API aberta:
+Em terminais separados:
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.main
-```
-
-No terceiro, mantenha o worker aberto:
-
-```powershell
 .\.venv\Scripts\python.exe -m app.workers.extraction_worker
 ```
 
-Não execute API e worker sequencialmente no mesmo terminal: o processo da API permanece em
-execução até ser interrompido. O Python 3.13 global não é a versão homologada. Um `.venv` Python
-3.12 já foi criado neste diretório; os exemplos chamam seu executável diretamente.
-Os entrypoints também detectam esse ambiente: `python -m app.main` e
-`python -m app.workers.extraction_worker` reiniciam automaticamente com o `.venv` 3.12. Se ele
-não existir, a inicialização informa claramente a versão exigida.
+`python -m app.combined` inicia API e worker no mesmo processo, como no Railway. Para executar a
+estruturação comercial separadamente, use `python -m app.structure_combined` em outro serviço.
 
-### Ambiente PostgreSQL
+## API v1
 
-```bash
-python -m venv .venv
-.venv/Scripts/activate
-pip install -e ".[dev]"
-copy .env.example .env
-alembic upgrade head
-python -m app.main
-```
-
-Em outro terminal:
-
-```bash
-.venv/Scripts/activate
-python -m app.workers.extraction_worker
-```
-
-Swagger: `http://localhost:8000/docs`. Para desenvolvimento, inicie API e worker separadamente;
-ambos devem apontar para o mesmo PostgreSQL e `STORAGE_PATH`.
-
-## Interface de teste
-
-Implantação pública no Railway:
-
-- Base da API: `https://apiextracaopdf-production.up.railway.app`
-- Interface: `https://apiextracaopdf-production.up.railway.app/ui/`
-- Swagger: `https://apiextracaopdf-production.up.railway.app/docs`
-- Healthcheck: `https://apiextracaopdf-production.up.railway.app/health`
-
-Com a API e o worker em execução, abra:
-
-```text
-http://localhost:8000/ui/
-```
-
-A rota `/` redireciona para essa interface. Ela permite selecionar ou arrastar um PDF, escolher o
-motor, acompanhar o polling e visualizar/copiar/baixar texto, Markdown ou JSON. Por padrão, a tela
-usa a mesma origem da API; o campo **API** permite testar outra URL, como a implantação Railway.
-Ao usar uma origem diferente, inclua a origem da interface em `CORS_ALLOWED_ORIGINS`.
-
-## Configuração
-
-Todas as opções estão em `.env.example`. Obrigatórias em produção: `DATABASE_URL`, um
-`STORAGE_PATH` persistente e o domínio exato do Base44 em `CORS_ALLOWED_ORIGINS`. Limites padrão:
-50 MiB, 500 páginas, chunks de 1 MiB e 3 tentativas. `DELETE_PHYSICAL_FILE=false` mantém o arquivo
-após exclusão lógica; altere conscientemente.
-
-Para estruturação, configure `OPENAI_API_KEY` no Railway e mantenha
-`STRUCTURING_PROVIDER=openai`. O modelo é configurável por `STRUCTURING_MODEL`; o padrão atual é
-`gpt-5.6-sol`. Schema e prompt iniciam em `1.0.0`. A chave nunca deve ser colocada no Git, enviada
-ao frontend ou registrada nos logs.
-
-Não use `*` em origens quando `CORS_ALLOW_CREDENTIALS=true`. Listas usam vírgulas. Para adicionar
-o Base44:
-
-```env
-CORS_ALLOWED_ORIGINS=https://seu-app.base44.app,http://localhost:5173
-```
-
-## Banco, migrações e concorrência
-
-```bash
-alembic upgrade head
-alembic downgrade base
-```
-
-As tabelas são `documents`, `extraction_jobs`, `document_results` e `document_pages`. Resultados
-grandes ficam fora de `documents`; JSON usa JSONB no PostgreSQL. O worker incrementa tentativas,
-registra duração/erros internos e recoloca o job em `queued` até `EXTRACTION_MAX_ATTEMPTS`.
-`error_details_internal` nunca aparece nas respostas públicas.
-
-## Contrato da API
-
-Autenticação não é implementada no MVP. Um gateway futuro pode usar `Authorization` ou
-`X-API-Key`, ambos já permitidos pelo CORS. Envie opcionalmente `X-Request-ID`; a API o ecoa ou
-gera um UUID. Erros têm a forma:
-
-```json
-{"error":{"code":"invalid_pdf_signature","message":"...","details":null,"request_id":"uuid"}}
-```
-
-| Objetivo | Método e rota | Entrada | Sucesso | Erros principais |
-|---|---|---|---|---|
-| Saúde | `GET /health` | - | `200` | - |
-| Prontidão | `GET /health/ready` | - | `200` | `503`/`500` se banco indisponível |
-| Upload | `POST /api/v1/documents` | multipart: `file`; opcionais `engine`, `output_formats`, `retain_original`; header `Idempotency-Key` | `202` IDs e URLs | `400`, `409`, `413`, `415`, `422`, `500` |
-| Documento/status | `GET /api/v1/documents/{id}` | UUID | `200` | `404` |
-| Job | `GET /api/v1/extraction-jobs/{id}` | UUID | `200` | `404` |
-| Resultado | `GET /api/v1/documents/{id}/result?format=json` | `text`, `markdown` ou `json` | `200` | `404`, `409` |
-| Páginas | `GET /api/v1/documents/{id}/pages?page=1&page_size=20` | paginação | `200` | `404`, `422` |
-| Página | `GET /api/v1/documents/{id}/pages/{number}` | número iniciado em 1 | `200` | `404` |
-| Lista | `GET /api/v1/documents` | `status`, `filename`, datas e paginação | `200` | `422` |
-| Reprocessar | `POST /api/v1/documents/{id}/reprocess` | JSON com engine/formatos | `202` | `404`, `409`, `422` |
-| Excluir | `DELETE /api/v1/documents/{id}` | UUID | `204` | `404` |
-
-Estados: `queued`, `processing`, `completed`, `failed`, `cancelled`. Não solicite resultado antes
-de `completed`; `409 result_not_ready` é esperado enquanto processa.
-
-## ESTRUTURAÇÃO DE PEDIDOS EXTRAÍDOS
-
-Esta camada é executada somente depois da extração bruta. O frontend envia apenas o
-`document_id`; a API recupera texto e páginas armazenados, preserva os marcadores de página e cria
-um job durável no PostgreSQL. O modo inicial recomendado é `preview`.
-
-O schema `1.0.0` contém somente número/data/cor, cliente e itens. Prazos de entrega ou produção,
-condições de pagamento, vencimentos, cronogramas e outras condições comerciais são ignorados e
-não possuem colunas no banco nem campos na resposta. Páginas contendo somente essas informações,
-cabeçalhos ou rodapés não geram itens.
-
-Fluxo obrigatório para o Base44:
-
-1. Enviar o PDF e aguardar a extração bruta em `completed`.
-2. Solicitar estruturação em `preview` usando o `document_id`.
-3. Consultar o structure job até `completed`, `needs_review` ou `failed`.
-4. Buscar e exibir o preview, com o cliente uma única vez e os itens em ordem.
-5. Conferir avisos, medidas, códigos repetidos e ocorrências.
-6. Persistir o mesmo preview aprovado e guardar `customer_id` e `order_id`.
-
-| Objetivo | Método e rota | Observações |
+| Método | Rota | Finalidade |
 |---|---|---|
-| Iniciar preview/persist | `POST /api/v1/documents/{document_id}/structure/order` | Body `mode` e `force_reprocess`; aceita `Idempotency-Key` |
-| Consultar job | `GET /api/v1/structure-jobs/{job_id}` | Progresso, versões, provider, modelo e erro seguro |
-| Buscar preview | `GET /api/v1/structure-jobs/{job_id}/result` | Resultado, totais determinísticos, checks e avisos |
-| Persistir preview | `POST /api/v1/structure-jobs/{job_id}/persist` | Transação única; aceita `Idempotency-Key` |
-| Buscar pedido | `GET /api/v1/orders/{order_id}` | Cliente aparece uma vez no nível do pedido |
-| Listar itens | `GET /api/v1/orders/{order_id}/items` | Cada item contém somente `order_id` |
-| Reprocessar | `POST /api/v1/documents/{document_id}/structure/order/reprocess` | Cria nova versão sem sobrescrever a anterior |
-| Listar versões | `GET /api/v1/documents/{document_id}/structure-results` | Histórico de previews e persistências |
+| `POST` | `/v1/extractions` | valida o PDF, cria job temporário e responde `202` |
+| `GET` | `/v1/extractions/{job_id}` | status e progresso (fallback ao SSE) |
+| `GET` | `/v1/extractions/{job_id}/events` | eventos SSE, heartbeat e reconexão |
+| `GET` | `/v1/extractions/{job_id}/result` | texto, Markdown ou JSON solicitado |
+| `DELETE` | `/v1/extractions/{job_id}` | cancela e remove arquivos temporários |
+| `GET` | `/health` | vivacidade |
+| `GET` | `/ready` | banco pronto |
 
-Não há autenticação no MVP. Envie `Content-Type: application/json`, `X-Request-ID` opcional e uma
-`Idempotency-Key` estável em cada POST crítico. A mesma chave e o mesmo conteúdo devolvem a
-operação original; reutilizá-la com conteúdo diferente retorna `409 idempotency_conflict`.
+Upload:
 
-```javascript
-const structureResponse = await fetch(
-  `${API_BASE_URL}/api/v1/documents/${documentId}/structure/order`,
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": crypto.randomUUID(),
-      "X-Request-ID": crypto.randomUUID()
-    },
-    body: JSON.stringify({mode: "preview", force_reprocess: false})
-  }
-);
-const structureJob = await structureResponse.json();
-
-for (;;) {
-  const statusResponse = await fetch(
-    `${API_BASE_URL}/api/v1/structure-jobs/${structureJob.structure_job_id}`
-  );
-  const status = await statusResponse.json();
-  if (["completed", "needs_review", "failed", "cancelled"].includes(status.status)) break;
-  await new Promise(resolve => setTimeout(resolve, 2000));
-}
-
-const preview = await fetch(
-  `${API_BASE_URL}/api/v1/structure-jobs/${structureJob.structure_job_id}/result`
-).then(response => response.json());
-
-const persisted = await fetch(
-  `${API_BASE_URL}/api/v1/structure-jobs/${structureJob.structure_job_id}/persist`,
-  {
-    method: "POST",
-    headers: {"Idempotency-Key": crypto.randomUUID()}
-  }
-).then(response => response.json());
+```bash
+curl -X POST http://localhost:8000/v1/extractions \
+  -H 'Idempotency-Key: exemplo-unico' \
+  -F 'file=@documento.pdf;type=application/pdf' \
+  -F 'output_format=json' \
+  -F 'ocr_mode=auto' \
+  -F 'ocr_language=por' \
+  -F 'extract_images=true' \
+  -F 'extract_tables=true' \
+  -F 'include_coordinates=true' \
+  -F 'image_output=reference' \
+  -F 'processing_mode=async'
 ```
 
-O frontend não deve criar um cliente por item, repetir dados do cliente nos itens, eliminar códigos
-repetidos ou persistir antes da conferência do preview. Após timeout de persistência, consulte o
-estado anterior e reutilize a mesma chave; não gere outra chave às cegas.
-
-Formato persistido para consumo:
+Resposta:
 
 ```json
 {
-  "id": "order-uuid",
-  "order_number": "1790",
-  "customer": {
-    "id": "customer-uuid",
-    "name": "CLIENTE EXEMPLO"
-  },
-  "items": [
-    {"id": "item-uuid", "order_id": "order-uuid", "original_code": "J01"}
-  ]
+  "job_id": "uuid",
+  "status": "queued",
+  "events_url": "/v1/extractions/uuid/events",
+  "status_url": "/v1/extractions/uuid",
+  "result_url": "/v1/extractions/uuid/result",
+  "expires_at": "ISO-8601"
 }
 ```
 
-Erros específicos incluem `document_not_ready`, `document_has_no_extracted_content`,
-`structure_job_already_running`, `structure_provider_error`, `structure_timeout`,
-`structure_validation_failed`, `structure_needs_review`, `structure_already_persisted` e
-`idempotency_conflict`. Todos usam o envelope padrão com `request_id` e não expõem prompt, chave,
-SQL, resposta bruta ou traceback.
-
-### Upload para Base44
-
-```javascript
-const formData = new FormData();
-formData.append("file", selectedFile);
-formData.append("engine", "auto");
-formData.append("output_formats", "text,markdown,json");
-formData.append("retain_original", "true");
-
-const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
-  method: "POST",
-  headers: {
-    "X-Request-ID": crypto.randomUUID(),
-    "Idempotency-Key": crypto.randomUUID()
-  },
-  body: formData
-});
-const payload = await response.json();
-if (!response.ok) throw new Error(`${payload.error.code}: ${payload.error.request_id}`);
-```
-
-Não defina `Content-Type` manualmente com `FormData`; o navegador cria o boundary. Guarde
-`document_id` e `job_id`. Repetir a mesma chave e o mesmo conteúdo devolve os IDs originais;
-mesma chave com conteúdo diferente retorna `409`.
+SSE com reconexão:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/documents \
-  -H "Idempotency-Key: exemplo-1790" \
-  -F "file=@pedido.pdf;type=application/pdf" \
-  -F "engine=auto" -F "output_formats=text,markdown,json" \
-  -F "retain_original=true"
+curl -N http://localhost:8000/v1/extractions/JOB_ID/events
+curl -N -H 'Last-Event-ID: 12' http://localhost:8000/v1/extractions/JOB_ID/events
 ```
 
-### Polling e resultado
+Eventos persistem apenas pelo TTL do job e incluem `job.queued`, `job.started`, `ocr.started`,
+`page.processed`, `job.completed`, `job.failed` e `job.cancelled`. A conexão envia heartbeat,
+encerra no estado terminal e tem timeout configurável.
 
-```javascript
-async function waitForDocument(documentId) {
-  for (;;) {
-    const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}`);
-    const document = await response.json();
-    if (!response.ok) throw new Error(document.error.code);
-    if (document.status === "completed") return document;
-    if (["failed", "cancelled"].includes(document.status)) {
-      throw new Error(`Extração encerrada: ${document.status}`);
-    }
-    await new Promise(resolve => setTimeout(resolve, 2000));
-  }
-}
+`output_format` aceita `text`, `markdown` ou `json` (padrão). `ocr_mode` aceita `auto`, `always` e
+`never`. `image_output` aceita referência temporária, Base64 ou somente metadados. Referências não
+expõem caminhos internos e expiram com o job.
 
-await waitForDocument(payload.document_id);
-const result = await fetch(
-  `${API_BASE_URL}/api/v1/documents/${payload.document_id}/result?format=json`
-).then(r => r.json());
-```
+O JSON público contém `schema_version`, metadados do documento, processamento, páginas, blocos,
+tabelas, imagens e estatísticas. Cada bloco declara `source`: `native`, `ocr`, `image`, `table`,
+`metadata` ou `hybrid`. Tabelas incluem cabeçalhos, linhas, colunas, células, Markdown, método e
+confiança. Imagens incluem hash, classificação determinística, coordenadas e associação textual.
 
-Chamadas equivalentes:
+## OCR automático e normalização
 
-```bash
-curl http://localhost:8000/api/v1/documents/DOCUMENT_ID
-curl http://localhost:8000/api/v1/extraction-jobs/JOB_ID
-curl 'http://localhost:8000/api/v1/documents/DOCUMENT_ID/result?format=markdown'
-curl 'http://localhost:8000/api/v1/documents/DOCUMENT_ID/pages?page=1&page_size=20'
-curl http://localhost:8000/api/v1/documents/DOCUMENT_ID/pages/1
-curl 'http://localhost:8000/api/v1/documents?status=completed&page=1&page_size=20'
-curl -X POST http://localhost:8000/api/v1/documents/DOCUMENT_ID/reprocess \
-  -H 'Content-Type: application/json' -d '{"engine":"marker","output_formats":["json"]}'
-curl -X DELETE http://localhost:8000/api/v1/documents/DOCUMENT_ID
-```
+O PyMuPDF sempre inspeciona cada página. OCR é solicitado quando caracteres ou palavras ficam
+abaixo do limite ou quando a proporção de caracteres inválidos supera o configurado. O roteador
+cria um PDF temporário de uma única página para o Marker e mescla o resultado com imagens/tabelas
+nativas, evitando OCR do documento inteiro. Falha isolada vira warning e não descarta as demais
+páginas.
 
-Exemplos JavaScript compactos para os demais endpoints (sempre valide `response.ok` e, em erro,
-leia o envelope padronizado):
+A normalização aplica Unicode NFKC, remove controles, corrige hifenização entre linhas, reduz
+espaços/quebras, elimina blocos duplicados e identifica cabeçalhos/rodapés repetidos. Alterações
+relevantes deixam rastreabilidade em metadados e warnings.
 
-```javascript
-await fetch(`${API_BASE_URL}/health`); // vivacidade
-await fetch(`${API_BASE_URL}/health/ready`); // banco pronto
-await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}`); // status
-await fetch(`${API_BASE_URL}/api/v1/extraction-jobs/${jobId}`); // job
-await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/result?format=text`);
-await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/pages?page=1&page_size=20`);
-await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/pages/1`);
-await fetch(`${API_BASE_URL}/api/v1/documents?status=completed&page=1&page_size=20`);
-await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/reprocess`, {
-  method: "POST",
-  headers: {"Content-Type": "application/json"},
-  body: JSON.stringify({engine: "native", output_formats: ["text", "json"]})
-});
-await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}`, {method: "DELETE"});
-```
+## Configuração
 
-Ordem obrigatória para o agente Base44: (1) enviar arquivo, (2) armazenar IDs, (3) consultar
-status, (4) esperar `completed`, (5) buscar resultado, (6) exibir falhas por `error.code` e
-`error.request_id`. Pare o polling ao concluir/falhar e não consulte agressivamente.
+Consulte `.env.example`. Variáveis principais:
 
-### Preflight e troubleshooting CORS
+- `DATABASE_URL`, `STORAGE_PATH`, `MAX_PDF_SIZE_MB`, `MAX_PDF_PAGES`.
+- `PDF_NATIVE_MIN_CHARS_PER_PAGE`, `PDF_NATIVE_MIN_WORDS_PER_PAGE`.
+- `PDF_NATIVE_MAX_INVALID_CHAR_RATIO`, `OCR_DPI`, `OCR_DEFAULT_LANGUAGE`.
+- `OCR_MAX_CONCURRENCY`, `MAX_IMAGES_PER_DOCUMENT`, `IGNORE_REPEATED_IMAGES`.
+- `EXTRACTION_TIMEOUT_SECONDS`, `EXTRACTION_JOB_TTL_SECONDS`.
+- `EXTRACTION_CLEANUP_INTERVAL_SECONDS`, `EXTRACTION_SSE_HEARTBEAT_SECONDS`.
+- `EXTRACTION_SSE_TIMEOUT_SECONDS`, `CORS_ALLOWED_ORIGINS`.
 
-```bash
-curl -i -X OPTIONS http://localhost:8000/api/v1/documents \
-  -H 'Origin: https://seu-app.base44.app' \
-  -H 'Access-Control-Request-Method: POST' \
-  -H 'Access-Control-Request-Headers: Authorization,Content-Type,Idempotency-Key'
-```
+Em produção, use PostgreSQL e um volume em `/data`; no perfil local, SQLite suporta apenas um
+worker. Não use `*` no CORS com credenciais habilitadas.
 
-Se faltar `Access-Control-Allow-Origin`, confira protocolo, domínio e porta exatos, reinicie o
-serviço após mudar a variável e confirme que não há barra final. Respostas 400/422/500 também
-passam pelo middleware CORS. Em upload, remova qualquer `Content-Type` definido pelo frontend.
+## Erros, segurança e privacidade
 
-## Railway
+Erros usam envelope estável com `code`, mensagem segura, detalhes e `request_id`. Há códigos para
+arquivo inválido, PDF vazio/corrompido/protegido, limites, job inexistente/expirado/cancelado,
+resultado não pronto e falhas de processamento. Tracebacks ficam apenas no banco/log interno.
 
-1. Crie um projeto a partir deste repositório e adicione PostgreSQL.
-2. No serviço da aplicação, referencie `DATABASE_URL=${{Postgres.DATABASE_URL}}`.
-3. Anexe um volume em `/data` e defina `STORAGE_PATH=/data/documents`. Sem volume, uploads são
-   perdidos a cada nova implantação.
-4. Defina `APP_ENV=production` e `DEFAULT_EXTRACTION_ENGINE=auto`.
-5. Para habilitar a estruturação, defina `OPENAI_API_KEY`, `STRUCTURING_PROVIDER=openai` e
-   `STRUCTURING_MODEL=gpt-5.6-sol`.
-6. Gere um domínio público. A interface de teste fica em `/ui/` e a documentação em `/docs`.
-
-O `railway.json` executa `alembic upgrade head` antes da implantação e inicia
-`python -m app.combined`, que mantém API, worker de extração e worker de estruturação no mesmo
-contêiner. Essa topologia é intencional:
-o backend atual armazena PDFs em disco, e os dois processos precisam enxergar o mesmo volume. Não
-aumente o número de réplicas enquanto o armazenamento for local. Ao migrar para S3/R2, API e
-workers podem voltar a serviços separados e escalar independentemente.
-
-O Dockerfile usa Python 3.12 slim e usuário não root. Logs JSON vão para stdout e carregam IDs,
-sem conteúdo integral do PDF ou segredos.
-
-## Marker: recursos, inicialização e licença
-
-`marker-pdf==2.0.0` está fixado. O primeiro uso pode baixar modelos grandes e aumentar muito o
-tempo de startup; CPU é suportada, mas PDFs complexos podem exigir vários GiB de RAM e sofrer
-timeout. Mantenha cache/volume para modelos, limite concorrência e considere GPU
-no futuro. Os testes normais usam engine fake/nativa; execute integrações pesadas com
-`pytest -m slow -o addopts=''`.
-
-O código da tag está sob Apache-2.0; os pesos usam OpenRAIL-M modificada e têm restrições
-comerciais. Leia `THIRD_PARTY_NOTICES.md` e obtenha validação jurídica/licença comercial antes de
-produção. A API continua funcional em modo `native` sem carregar modelos Marker.
+A validação confere extensão, MIME, assinatura real, tamanho, páginas, criptografia e corrupção.
+Nomes são sanitizados, o storage impede path traversal e nenhuma ação incorporada no PDF é
+executada. Logs não incluem conteúdo integral, Base64, tokens ou credenciais. Autenticação/API key
+e isolamento multiempresa ainda devem ser aplicados no gateway ou em uma evolução do modelo de
+cliente; não exponha esta versão diretamente a múltiplos tenants não confiáveis.
 
 ## Testes e qualidade
 
-```bash
-pytest
-pytest -m slow -o addopts=''
-ruff check .
-ruff format --check .
-mypy app
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check app tests
+.\.venv\Scripts\python.exe -m mypy app
 ```
 
-A suíte cobre upload válido/inválido, assinatura, idempotência, CORS/preflight, OpenAPI, Unicode,
-ordem de páginas, seleção nativa, claim do worker e o PDF-modelo local quando disponível.
+Testes pesados do Marker são opt-in: `pytest -m slow -o addopts=''`. Testes comuns usam PDFs
+sintéticos e mocks, sem chamadas externas.
 
-## Limitações e evolução
+## Railway
 
-- `LocalStorageBackend` requer volume persistente no Railway; S3/R2 ainda não foi implementado.
-- O progresso é atualizado no começo/fim; progresso fino por página depende de hooks do Marker.
-- O motor nativo preserva blocos/coordenadas, mas não reconstrói semanticamente itens do orçamento.
-- Marker não é executado na suíte padrão por custo de download/CPU/RAM.
-- Autenticação, multiempresa, agente de IA, esquemas de pedido, plano de corte e filas Redis/Celery
-  são evoluções futuras deliberadamente fora do MVP.
+`railway.json` aplica `alembic upgrade head`, inicia `python -m app.combined` e verifica `/health`.
+Configure `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `APP_ENV=production` e
+`STORAGE_PATH=/data/documents`; anexe um volume a `/data`. O primeiro OCR pode baixar/carregar
+modelos grandes, consumir vários GiB de RAM e ser lento em CPU.
+
+## Limitações conhecidas e próximos passos
+
+- O fallback atual é por página; OCR por região/imagem ainda é evolução futura.
+- Classificação/associação de imagens é determinística e conservadora, sem IA generativa.
+- PyMuPDF não recupera toda tabela ou ordem semântica de PDFs graficamente complexos.
+- Storage local não suporta réplicas independentes; implementar S3/MinIO antes de escalar API e
+  workers separadamente.
+- Adicionar API keys, `client_id`, rate limiting, quotas e limites de conexões SSE para ambiente
+  multiempresa.
+- Instrumentar métricas Prometheus/OpenTelemetry; os logs estruturados já carregam IDs e etapas.
