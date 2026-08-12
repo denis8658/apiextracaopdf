@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 
 from app.api.dependencies import get_extraction_service
 from app.core.config import Settings, get_settings
+from app.core.errors import AppError
 from app.schemas.extraction import ExtractionOptions
 from app.schemas.extraction_api import (
     ExtractionAccepted,
@@ -23,8 +24,10 @@ TERMINAL = {"completed", "failed", "cancelled"}
 
 @router.post("", response_model=ExtractionAccepted, status_code=status.HTTP_202_ACCEPTED)
 async def create_extraction(
-    file: Annotated[UploadFile, File(description="Arquivo PDF")],
     service: Annotated[ExtractionService, Depends(get_extraction_service)],
+    file: Annotated[UploadFile | None, File(description="Arquivo PDF")] = None,
+    cliente_id: Annotated[str | None, Form(max_length=255)] = None,
+    obra_id: Annotated[str | None, Form(max_length=255)] = None,
     output_format: Annotated[Literal["text", "markdown", "json"], Form()] = "json",
     ocr_mode: Annotated[Literal["auto", "always", "never"], Form()] = "auto",
     ocr_language: Annotated[str, Form(min_length=2, max_length=32)] = "por",
@@ -36,6 +39,12 @@ async def create_extraction(
     pages: Annotated[str, Form(min_length=1, max_length=255)] = "all",
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> ExtractionAccepted:
+    if file is None:
+        raise AppError("missing_file", "arquivo é obrigatório", 400)
+    if cliente_id is None or not cliente_id.strip():
+        raise AppError("missing_cliente_id", "cliente_id é obrigatório", 400)
+    if obra_id is None or not obra_id.strip():
+        raise AppError("missing_obra_id", "obra_id é obrigatório", 400)
     options = ExtractionOptions(
         output_format=output_format,
         output_formats=[output_format],
@@ -47,7 +56,7 @@ async def create_extraction(
         image_output=image_output,
         pages=pages,
     )
-    created = await service.create(file, options, idempotency_key)
+    created = await service.create(file, options, idempotency_key, cliente_id, obra_id)
     job, document = created.job, created.document
     return ExtractionAccepted(
         job_id=job.id,

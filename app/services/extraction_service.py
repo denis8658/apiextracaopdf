@@ -27,7 +27,12 @@ class ExtractionService:
         self.documents = DocumentService(session, storage, settings)
 
     async def create(
-        self, file: UploadFile, options: ExtractionOptions, idempotency_key: str | None
+        self,
+        file: UploadFile,
+        options: ExtractionOptions,
+        idempotency_key: str | None,
+        cliente_id: str | None = None,
+        obra_id: str | None = None,
     ) -> CreatedUpload:
         created = await self.documents.upload(
             file,
@@ -38,6 +43,8 @@ class ExtractionService:
             options=options,
             temporary=True,
             reuse_by_hash=False,
+            cliente_id=cliente_id,
+            obra_id=obra_id,
         )
         if not created.reused:
             self.session.add(

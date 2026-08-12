@@ -164,6 +164,11 @@ def public_result(document, job, result, duration_ms: int) -> dict:
     metadata = result.metadata
     return {
         "schema_version": "1.0",
+        "contexto": (
+            {"cliente_id": document.cliente_id, "obra_id": document.obra_id}
+            if document.cliente_id is not None and document.obra_id is not None
+            else None
+        ),
         "document": {
             "filename": document.original_filename,
             "mime_type": document.content_type,

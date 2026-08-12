@@ -14,6 +14,11 @@ class ExtractionAccepted(BaseModel):
     expires_at: datetime
 
 
+class ExtractionContext(BaseModel):
+    cliente_id: str
+    obra_id: str
+
+
 class ExtractionStatusResponse(BaseModel):
     job_id: uuid.UUID
     status: str
@@ -136,6 +141,7 @@ class PublicExtractionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1.0"] = "1.0"
+    contexto: ExtractionContext | None = None
     document: PublicDocumentInfo
     processing: PublicProcessingInfo
     page_selection: PublicPageSelection | None = None

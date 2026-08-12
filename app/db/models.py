@@ -39,6 +39,8 @@ class Document(UUIDTimestampMixin, Base):
     retain_original: Mapped[bool] = mapped_column(default=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    cliente_id: Mapped[str | None] = mapped_column(String(255))
+    obra_id: Mapped[str | None] = mapped_column(String(255))
     jobs: Mapped[list["ExtractionJob"]] = relationship(back_populates="document")
     pages: Mapped[list["DocumentPage"]] = relationship(back_populates="document")
     result: Mapped["DocumentResult | None"] = relationship(back_populates="document", uselist=False)

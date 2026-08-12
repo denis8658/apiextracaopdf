@@ -18,6 +18,8 @@ def test_public_result_reports_requested_processed_and_skipped_pages():
         page_count=5,
         file_size_bytes=100,
         sha256="a" * 64,
+        cliente_id=" cli_456 ",
+        obra_id="obr_789",
     )
     job = SimpleNamespace(
         id=uuid.uuid4(),
@@ -50,7 +52,9 @@ def test_public_result_reports_requested_processed_and_skipped_pages():
         metadata={},
         engine="native",
     )
-    selection = public_result(document, job, result, 10)["page_selection"]
+    payload = public_result(document, job, result, 10)
+    assert payload["contexto"] == {"cliente_id": " cli_456 ", "obra_id": "obr_789"}
+    selection = payload["page_selection"]
     assert selection == {
         "selector": "1,3,5",
         "requested_pages": [1, 3, 5],

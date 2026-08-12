@@ -81,6 +81,8 @@ Upload:
 curl -X POST http://localhost:8000/v1/extractions \
   -H 'Idempotency-Key: exemplo-unico' \
   -F 'file=@documento.pdf;type=application/pdf' \
+  -F 'cliente_id=cli_456' \
+  -F 'obra_id=obr_789' \
   -F 'output_format=json' \
   -F 'ocr_mode=auto' \
   -F 'ocr_language=por' \
@@ -102,6 +104,24 @@ Resposta:
   "status_url": "/v1/extractions/uuid",
   "result_url": "/v1/extractions/uuid/result",
   "expires_at": "ISO-8601"
+}
+```
+
+Os campos multipart `file`, `cliente_id` e `obra_id` são obrigatórios. Os IDs são tratados como
+contexto opaco (máximo de 255 caracteres), não são consultados no banco nem alterados, e aparecem
+no resultado JSON:
+
+```json
+{
+  "schema_version": "1.0",
+  "contexto": {
+    "cliente_id": "cli_456",
+    "obra_id": "obr_789"
+  },
+  "document": {},
+  "processing": {},
+  "pages": [],
+  "statistics": {}
 }
 ```
 

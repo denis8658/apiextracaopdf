@@ -14,7 +14,7 @@ const elements = {
   form: $("#uploadForm"), fileInput: $("#pdfFile"), dropzone: $("#dropzone"),
   dropTitle: $("#dropTitle"), dropHint: $("#dropHint"), apiBase: $("#apiBase"),
   engine: $("#engine"), retain: $("#retainOriginal"), submit: $("#submitButton"),
-  pages: $("#pages"),
+  pages: $("#pages"), clienteId: $("#clienteId"), obraId: $("#obraId"),
   status: $("#serviceStatus"), empty: $("#emptyState"), progress: $("#progressCard"),
   caption: $("#processCaption"), documentName: $("#documentName"), documentMeta: $("#documentMeta"),
   statusPill: $("#statusPill"), progressMessage: $("#progressMessage"),
@@ -147,6 +147,8 @@ async function handleSubmit(event) {
 
   const formData = new FormData();
   formData.append("file", state.file);
+  formData.append("cliente_id", elements.clienteId.value);
+  formData.append("obra_id", elements.obraId.value);
   formData.append("engine", elements.engine.value);
   formData.append("output_formats", "text,markdown,json");
   formData.append("retain_original", String(elements.retain.checked));

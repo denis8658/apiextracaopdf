@@ -53,7 +53,13 @@ def test_cors_preflight_blocked(api_client):
 def test_upload_valid_pdf_and_idempotency(api_client, sample_pdf):
     headers = {"Idempotency-Key": "same-request", "Origin": "http://localhost:5173"}
     files = {"file": ("orçamento.pdf", sample_pdf, "application/pdf")}
-    data = {"engine": "native", "output_formats": "text,json", "retain_original": "true"}
+    data = {
+        "engine": "native",
+        "output_formats": "text,json",
+        "retain_original": "true",
+        "cliente_id": "cli_456",
+        "obra_id": "obr_789",
+    }
     first = api_client.post("/api/v1/documents", files=files, data=data, headers=headers)
     second = api_client.post("/api/v1/documents", files=files, data=data, headers=headers)
     assert first.status_code == 202
@@ -66,7 +72,12 @@ def test_test_interface_upload_honors_page_selection(api_client, sample_pdf):
     response = api_client.post(
         "/api/v1/documents",
         files={"file": ("documento.pdf", sample_pdf, "application/pdf")},
-        data={"engine": "native", "pages": "odd"},
+        data={
+            "engine": "native",
+            "pages": "odd",
+            "cliente_id": "cli_456",
+            "obra_id": "obr_789",
+        },
         headers={"Idempotency-Key": "selected-pages"},
     )
     assert response.status_code == 202
@@ -79,6 +90,7 @@ def test_upload_validation_errors_have_standard_shape(api_client):
     response = api_client.post(
         "/api/v1/documents",
         files={"file": ("bad.txt", b"not pdf", "text/plain")},
+        data={"cliente_id": "cli_456", "obra_id": "obr_789"},
         headers={"Origin": "http://localhost:5173"},
     )
     assert response.status_code == 415
@@ -91,6 +103,7 @@ def test_empty_file_is_400_with_cors(api_client):
     response = api_client.post(
         "/api/v1/documents",
         files={"file": ("empty.pdf", b"", "application/pdf")},
+        data={"cliente_id": "cli_456", "obra_id": "obr_789"},
         headers={"Origin": "http://localhost:5173"},
     )
     assert response.status_code == 400
@@ -102,6 +115,7 @@ def test_invalid_signature(api_client):
     response = api_client.post(
         "/api/v1/documents",
         files={"file": ("bad.pdf", b"not pdf", "application/pdf")},
+        data={"cliente_id": "cli_456", "obra_id": "obr_789"},
         headers={"Origin": "http://localhost:5173"},
     )
     assert response.status_code == 422
@@ -146,7 +160,12 @@ def test_legacy_json_result_projects_text_for_test_interface(api_client):
                 metadata_json={},
                 plain_text="Página 1\ntexto reconhecido",
                 markdown="# Página 1\n\ntexto reconhecido",
-                structured_json={"schema_version": "1.0", "processing": {}, "pages": []},
+                structured_json={
+                    "schema_version": "1.0",
+                    "contexto": {"cliente_id": "cli_456", "obra_id": "obr_789"},
+                    "processing": {},
+                    "pages": [],
+                },
             )
 
     app.dependency_overrides[get_document_service] = lambda: ResultService()
@@ -155,4 +174,5 @@ def test_legacy_json_result_projects_text_for_test_interface(api_client):
     finally:
         app.dependency_overrides[get_document_service] = original
     assert response.status_code == 200
+    assert response.json()["contexto"] == {"cliente_id": "cli_456", "obra_id": "obr_789"}
     assert response.json()["document"]["plain_text"] == "Página 1\ntexto reconhecido"

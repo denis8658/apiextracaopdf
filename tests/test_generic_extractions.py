@@ -17,6 +17,7 @@ from app.workers import extraction_worker
 
 
 def create_job(api_client, sample_pdf, **fields):
+    fields = {"cliente_id": "cli_456", "obra_id": "obr_789", **fields}
     return api_client.post(
         "/v1/extractions",
         files={"file": ("documento.pdf", sample_pdf, "application/pdf")},
@@ -91,17 +92,46 @@ def test_generic_jobs_do_not_reuse_hash_and_idempotency_includes_options(api_cli
     original = api_client.post(
         "/v1/extractions",
         files={"file": ("documento.pdf", sample_pdf, "application/pdf")},
-        data={"output_format": "json"},
+        data={"output_format": "json", "cliente_id": "cli", "obra_id": "obra"},
         headers=headers,
     )
     changed = api_client.post(
         "/v1/extractions",
         files={"file": ("documento.pdf", sample_pdf, "application/pdf")},
-        data={"output_format": "text"},
+        data={"output_format": "text", "cliente_id": "cli", "obra_id": "obra"},
         headers=headers,
     )
     assert original.status_code == 202
     assert changed.status_code == 409
+
+
+def test_generic_upload_requires_context_and_file(api_client, sample_pdf):
+    files = {"file": ("documento.pdf", sample_pdf, "application/pdf")}
+
+    missing_cliente = api_client.post(
+        "/v1/extractions", files=files, data={"obra_id": "obr_789"}
+    )
+    assert missing_cliente.status_code == 400
+    assert missing_cliente.json()["error"]["message"] == "cliente_id é obrigatório"
+
+    missing_obra = api_client.post(
+        "/v1/extractions", files=files, data={"cliente_id": "cli_456"}
+    )
+    assert missing_obra.status_code == 400
+    assert missing_obra.json()["error"]["message"] == "obra_id é obrigatório"
+
+    missing_file = api_client.post(
+        "/v1/extractions", data={"cliente_id": "cli_456", "obra_id": "obr_789"}
+    )
+    assert missing_file.status_code == 400
+    assert missing_file.json()["error"]["message"] == "arquivo é obrigatório"
+
+
+def test_generic_upload_preserves_context_exactly(api_client, sample_pdf):
+    response = create_job(
+        api_client, sample_pdf, cliente_id="  CLI-Árvore  ", obra_id="obra/789?x=1"
+    )
+    assert response.status_code == 202
 
 
 @pytest.mark.asyncio

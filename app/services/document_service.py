@@ -65,6 +65,8 @@ class DocumentService:
         temporary: bool = False,
         reuse_by_hash: bool = True,
         page_selector: str = "all",
+        cliente_id: str | None = None,
+        obra_id: str | None = None,
     ) -> CreatedUpload:
         formats = parse_output_formats(output_formats)
         if engine not in {"auto", "native", "marker"}:
@@ -88,7 +90,9 @@ class DocumentService:
             await self.storage.delete(validated.storage_key)
             raise
 
-        fingerprint = f"{validated.sha256}:{options.model_dump_json()}".encode()
+        fingerprint = (
+            f"{validated.sha256}:{options.model_dump_json()}:{cliente_id}:{obra_id}"
+        ).encode()
         request_sha256 = hashlib.sha256(fingerprint).hexdigest()
         existing_job = None
         if idempotency_key:
@@ -137,6 +141,8 @@ class DocumentService:
                 if temporary
                 else None
             ),
+            cliente_id=cliente_id,
+            obra_id=obra_id,
         )
         job = ExtractionJob(
             document=document,

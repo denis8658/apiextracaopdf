@@ -7,6 +7,7 @@ from fastapi.params import Depends
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.api.dependencies import get_document_service
+from app.core.errors import AppError
 from app.schemas.api import (
     DocumentListItem,
     DocumentStatusResponse,
@@ -30,14 +31,22 @@ router = APIRouter(prefix="/api/v1", tags=["documents"])
     summary="Envia um PDF e agenda sua extração",
 )
 async def upload_document(
-    file: Annotated[UploadFile, File(description="Arquivo PDF")],
     service: Annotated[DocumentService, Depends(get_document_service)],
+    file: Annotated[UploadFile | None, File(description="Arquivo PDF")] = None,
+    cliente_id: Annotated[str | None, Form(max_length=255)] = None,
+    obra_id: Annotated[str | None, Form(max_length=255)] = None,
     engine: Annotated[Literal["auto", "native", "marker"], Form()] = "auto",
     output_formats: Annotated[str, Form()] = "text,markdown,json",
     retain_original: Annotated[bool, Form()] = True,
     pages: Annotated[str, Form(min_length=1, max_length=255)] = "all",
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> UploadResponse:
+    if file is None:
+        raise AppError("missing_file", "arquivo é obrigatório", 400)
+    if cliente_id is None or not cliente_id.strip():
+        raise AppError("missing_cliente_id", "cliente_id é obrigatório", 400)
+    if obra_id is None or not obra_id.strip():
+        raise AppError("missing_obra_id", "obra_id é obrigatório", 400)
     created = await service.upload(
         file,
         engine,
@@ -45,6 +54,8 @@ async def upload_document(
         retain_original,
         idempotency_key,
         page_selector=pages,
+        cliente_id=cliente_id,
+        obra_id=obra_id,
     )
     return service.upload_response(created)
 
@@ -93,6 +104,7 @@ async def get_result(
     if format == "markdown":
         return PlainTextResponse(result.markdown, media_type="text/markdown; charset=utf-8")
     document_payload = dict(result.structured_json)
+    contexto = document_payload.pop("contexto", None)
     document_payload["plain_text"] = result.plain_text
     document_payload["markdown"] = result.markdown
     methods = {
@@ -104,6 +116,7 @@ async def get_result(
     return JSONResponse(
         {
             "schema_version": result.schema_version,
+            "contexto": contexto,
             "metadata": result.metadata_json,
             "document": document_payload,
         }
