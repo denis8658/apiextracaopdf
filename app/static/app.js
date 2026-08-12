@@ -95,6 +95,16 @@ async function pollDocument(documentId, signal) {
     setProgress(document);
     if (document.status === "completed") return document;
     if (["failed", "cancelled"].includes(document.status)) {
+      if (state.jobId) {
+        try {
+          const job = await request(`/api/v1/extraction-jobs/${state.jobId}`, { signal });
+          if (job.error_message_safe) {
+            throw { message: `${job.error_message_safe} (${job.error_code || document.status})` };
+          }
+        } catch (error) {
+          if (error?.message) throw error;
+        }
+      }
       throw { message: `O processamento terminou com status “${document.status}”.` };
     }
     await sleep(2000, signal);

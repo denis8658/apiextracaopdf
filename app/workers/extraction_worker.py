@@ -90,6 +90,9 @@ async def _save_images(storage, job_id, result, image_output: str) -> None:
                 async def chunks(value=image.raw_bytes):
                     yield value
 
+                # A estruturação acontece depois das imagens e pode disparar um retry do mesmo
+                # job. Remova a referência da tentativa anterior para que o retry seja idempotente.
+                await storage.delete(key)
                 await storage.save(key, chunks())
                 image.reference = f"/v1/extractions/{job_id}/files/{filename}"
             image.raw_bytes = None

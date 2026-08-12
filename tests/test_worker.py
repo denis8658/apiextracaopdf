@@ -7,13 +7,39 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.base import Base
 from app.db.models import Document, ExtractionJob
-from app.schemas.extraction import ExtractedPage, ExtractionResult
+from app.schemas.extraction import ExtractedImage, ExtractedPage, ExtractionResult
+from app.storage import LocalStorageBackend
 from app.workers.extraction_worker import (
     StructuringStageError,
+    _save_images,
     claim_job,
     persist_failure,
     public_result,
 )
+
+
+@pytest.mark.asyncio
+async def test_image_saving_is_idempotent_across_job_retries(tmp_path):
+    storage = LocalStorageBackend(tmp_path)
+    job_id = uuid.uuid4()
+    image = ExtractedImage(
+        image_id="p1-i1",
+        page_number=1,
+        index=1,
+        format="png",
+        width=1,
+        height=1,
+        sha256="a" * 64,
+        raw_bytes=b"first-attempt",
+    )
+    result = SimpleNamespace(pages=[SimpleNamespace(images=[image])])
+
+    await _save_images(storage, job_id, result, "reference")
+    image.raw_bytes = b"retry-attempt"
+    await _save_images(storage, job_id, result, "reference")
+
+    saved = await storage.open(f"jobs/{job_id}/images/p1-i1.png")
+    assert saved.read_bytes() == b"retry-attempt"
 
 
 def test_public_result_reports_requested_processed_and_skipped_pages():
