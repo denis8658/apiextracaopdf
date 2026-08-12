@@ -16,6 +16,7 @@ from app.schemas.extraction_api import (
     ExtractionStatusResponse,
     PublicExtractionResult,
 )
+from app.schemas.pdf_structuring import StructuredPdfResponse
 from app.services.extraction_service import ExtractionService
 
 router = APIRouter(prefix="/v1/extractions", tags=["extractions"])
@@ -37,6 +38,7 @@ async def create_extraction(
     image_output: Annotated[Literal["reference", "base64", "metadata"], Form()] = "reference",
     processing_mode: Annotated[Literal["async"], Form()] = "async",
     pages: Annotated[str, Form(min_length=1, max_length=255)] = "all",
+    structure_output: Annotated[bool, Form()] = False,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> ExtractionAccepted:
     if file is None:
@@ -45,6 +47,12 @@ async def create_extraction(
         raise AppError("missing_cliente_id", "cliente_id é obrigatório", 400)
     if obra_id is None or not obra_id.strip():
         raise AppError("missing_obra_id", "obra_id é obrigatório", 400)
+    if structure_output and output_format != "json":
+        raise AppError(
+            "invalid_structured_output_format",
+            "structure_output requer output_format=json",
+            400,
+        )
     options = ExtractionOptions(
         output_format=output_format,
         output_formats=[output_format],
@@ -56,7 +64,9 @@ async def create_extraction(
         image_output=image_output,
         pages=pages,
     )
-    created = await service.create(file, options, idempotency_key, cliente_id, obra_id)
+    created = await service.create(
+        file, options, idempotency_key, cliente_id, obra_id, structure_output
+    )
     job, document = created.job, created.document
     return ExtractionAccepted(
         job_id=job.id,
@@ -98,7 +108,8 @@ async def extraction_result(
         return PlainTextResponse(result.plain_text, media_type="text/plain; charset=utf-8")
     if job.output_format == "markdown":
         return PlainTextResponse(result.markdown, media_type="text/markdown; charset=utf-8")
-    payload = PublicExtractionResult.model_validate(result.structured_json).model_dump(mode="json")
+    schema = StructuredPdfResponse if job.structure_output else PublicExtractionResult
+    payload = schema.model_validate(result.structured_json).model_dump(mode="json")
     return JSONResponse(payload)
 
 

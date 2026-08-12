@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.base import Base
 from app.db.models import Document, ExtractionJob
 from app.schemas.extraction import ExtractedPage, ExtractionResult
-from app.workers.extraction_worker import claim_job, public_result
+from app.workers.extraction_worker import (
+    StructuringStageError,
+    claim_job,
+    persist_failure,
+    public_result,
+)
 
 
 def test_public_result_reports_requested_processed_and_skipped_pages():
@@ -102,4 +107,57 @@ async def test_claim_job_changes_state_and_attempt(tmp_path):
         assert claimed.attempt_count == 1
     async with sessions() as second:
         assert await claim_job(second) is None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_structuring_failure_has_safe_stage_and_does_not_create_business_records(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'failure.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with sessions() as session:
+        document = Document(
+            original_filename="test.pdf",
+            safe_filename="test.pdf",
+            content_type="application/pdf",
+            file_size_bytes=10,
+            sha256="a" * 64,
+            storage_provider="local",
+            storage_key=f"x/{uuid.uuid4()}.pdf",
+            status="processing",
+            detected_pdf_type="native",
+            retain_original=True,
+            cliente_id="cli",
+            obra_id="obra",
+        )
+        job = ExtractionJob(
+            document=document,
+            status="processing",
+            engine_requested="native",
+            requested_formats=["json"],
+            max_attempts=1,
+            attempt_count=1,
+            structure_output=True,
+        )
+        session.add_all([document, job])
+        await session.commit()
+        job_id = job.id
+
+    async with sessions() as session:
+        await persist_failure(session, job_id, StructuringStageError(), 20)
+
+    async with sessions() as session:
+        failed = await session.get(ExtractionJob, job_id)
+        assert failed.status == "failed"
+        assert failed.current_stage == "structuring_failed"
+        assert failed.error_code == "STRUCTURING_FAILED"
+        assert "internal detail" not in failed.error_message_safe
+        from sqlalchemy import func, select
+
+        from app.db.models import Order, OrderItem, StructureJob
+
+        assert await session.scalar(select(func.count()).select_from(StructureJob)) == 0
+        assert await session.scalar(select(func.count()).select_from(Order)) == 0
+        assert await session.scalar(select(func.count()).select_from(OrderItem)) == 0
     await engine.dispose()

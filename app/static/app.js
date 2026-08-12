@@ -14,6 +14,7 @@ const elements = {
   form: $("#uploadForm"), fileInput: $("#pdfFile"), dropzone: $("#dropzone"),
   dropTitle: $("#dropTitle"), dropHint: $("#dropHint"), apiBase: $("#apiBase"),
   engine: $("#engine"), retain: $("#retainOriginal"), submit: $("#submitButton"),
+  structureOutput: $("#structureOutput"),
   pages: $("#pages"), clienteId: $("#clienteId"), obraId: $("#obraId"),
   status: $("#serviceStatus"), empty: $("#emptyState"), progress: $("#progressCard"),
   caption: $("#processCaption"), documentName: $("#documentName"), documentMeta: $("#documentMeta"),
@@ -122,10 +123,13 @@ function renderResult(format = state.format) {
   });
   const document = state.result?.document || state.result || {};
   const pages = document.pages || [];
+  const items = state.result?.itens || [];
   const chars = contentFor("text").length;
   const methods = [...new Set(pages.map((page) => page.extraction_method).filter(Boolean))];
   const engine = document.engine || methods.join(" + ") || "—";
-  elements.resultSummary.innerHTML = `<span>${pages.length} páginas</span><span>${chars.toLocaleString("pt-BR")} caracteres</span><span>motor ${engine}</span>`;
+  elements.resultSummary.innerHTML = items.length
+    ? `<span>${items.length} itens estruturados</span>`
+    : `<span>${pages.length} páginas</span><span>${chars.toLocaleString("pt-BR")} caracteres</span><span>motor ${engine}</span>`;
   elements.resultContent.textContent = contentFor(format);
 }
 
@@ -153,6 +157,7 @@ async function handleSubmit(event) {
   formData.append("output_formats", "text,markdown,json");
   formData.append("retain_original", String(elements.retain.checked));
   formData.append("pages", elements.pages.value || "all");
+  formData.append("structure_output", String(elements.structureOutput.checked));
 
   try {
     const upload = await request("/api/v1/documents", {
@@ -168,7 +173,7 @@ async function handleSubmit(event) {
     localStorage.setItem("leitor:lastDocument", state.documentId);
     await pollDocument(state.documentId, state.pollController.signal);
     state.result = await request(`/api/v1/documents/${state.documentId}/result?format=json`, { signal: state.pollController.signal });
-    renderResult("text");
+    renderResult(state.result?.itens ? "json" : "text");
     elements.results.classList.remove("hidden");
     elements.results.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {

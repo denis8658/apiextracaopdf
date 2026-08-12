@@ -134,6 +134,21 @@ def test_generic_upload_preserves_context_exactly(api_client, sample_pdf):
     assert response.status_code == 202
 
 
+def test_generic_upload_accepts_structured_output_mode(api_client, sample_pdf):
+    response = create_job(api_client, sample_pdf, structure_output="true")
+    assert response.status_code == 202
+    status = api_client.get(f"/v1/extractions/{response.json()['job_id']}")
+    assert status.status_code == 200
+
+
+def test_structured_output_requires_json(api_client, sample_pdf):
+    response = create_job(
+        api_client, sample_pdf, structure_output="true", output_format="text"
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_structured_output_format"
+
+
 @pytest.mark.asyncio
 async def test_expiration_cleanup_removes_temporary_pdf(tmp_path, sample_pdf, monkeypatch):
     database = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'expiry.db'}")

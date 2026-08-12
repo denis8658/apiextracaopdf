@@ -19,6 +19,7 @@ from app.schemas.api import (
     ReprocessRequest,
     UploadResponse,
 )
+from app.schemas.pdf_structuring import StructuredPdfResponse
 from app.services.document_service import DocumentService
 
 router = APIRouter(prefix="/api/v1", tags=["documents"])
@@ -39,6 +40,7 @@ async def upload_document(
     output_formats: Annotated[str, Form()] = "text,markdown,json",
     retain_original: Annotated[bool, Form()] = True,
     pages: Annotated[str, Form(min_length=1, max_length=255)] = "all",
+    structure_output: Annotated[bool, Form()] = False,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> UploadResponse:
     if file is None:
@@ -56,6 +58,7 @@ async def upload_document(
         page_selector=pages,
         cliente_id=cliente_id,
         obra_id=obra_id,
+        structure_output=structure_output,
     )
     return service.upload_response(created)
 
@@ -98,7 +101,14 @@ async def get_result(
     service: Annotated[DocumentService, Depends(get_document_service)],
     format: Literal["text", "markdown", "json"] = Query("json"),
 ):
+    document = await service.get_document(document_id)
+    job = max(document.jobs, key=lambda item: item.created_at) if document.jobs else None
     result = await service.get_result(document_id)
+    if job and job.structure_output:
+        payload = StructuredPdfResponse.model_validate(result.structured_json).model_dump(
+            mode="json"
+        )
+        return JSONResponse(payload)
     if format == "text":
         return PlainTextResponse(result.plain_text, media_type="text/plain; charset=utf-8")
     if format == "markdown":

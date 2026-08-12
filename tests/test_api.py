@@ -154,6 +154,9 @@ def test_legacy_json_result_projects_text_for_test_interface(api_client):
     original = app.dependency_overrides[get_document_service]
 
     class ResultService:
+        async def get_document(self, document_id):
+            return SimpleNamespace(jobs=[])
+
         async def get_result(self, document_id):
             return SimpleNamespace(
                 schema_version="1.0",

@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     structuring_provider: Literal["openai"] = "openai"
     structuring_model: str = "gpt-5.6-sol"
     openai_api_key: SecretStr | None = None
+    structuring_api_key: SecretStr | None = None
+    structuring_base_url: str = "https://api.openai.com/v1"
+    structuring_api_mode: Literal["responses", "chat_completions"] = "responses"
     structuring_timeout_seconds: int = Field(120, gt=0)
     structuring_max_attempts: int = Field(3, ge=1)
     structuring_worker_poll_seconds: float = Field(2, gt=0)
@@ -105,6 +108,15 @@ class Settings(BaseSettings):
     @property
     def max_pdf_size_bytes(self) -> int:
         return self.max_pdf_size_mb * 1024 * 1024
+
+    @property
+    def effective_structuring_api_key(self) -> SecretStr | None:
+        return self.structuring_api_key or self.openai_api_key
+
+    @property
+    def effective_structuring_base_url(self) -> str:
+        base = self.structuring_base_url.rstrip("/")
+        return base if base.endswith("/v1") else f"{base}/v1"
 
 
 @lru_cache

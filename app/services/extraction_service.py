@@ -33,6 +33,7 @@ class ExtractionService:
         idempotency_key: str | None,
         cliente_id: str | None = None,
         obra_id: str | None = None,
+        structure_output: bool = False,
     ) -> CreatedUpload:
         created = await self.documents.upload(
             file,
@@ -45,6 +46,7 @@ class ExtractionService:
             reuse_by_hash=False,
             cliente_id=cliente_id,
             obra_id=obra_id,
+            structure_output=structure_output,
         )
         if not created.reused:
             self.session.add(
@@ -77,6 +79,14 @@ class ExtractionService:
         job, _ = await self.get_job(job_id)
         if job.status == "cancelled":
             raise AppError("JOB_CANCELLED", "O trabalho foi cancelado.", 409)
+        if job.status == "failed":
+            stage = "structuring" if job.error_code == "STRUCTURING_FAILED" else "extraction"
+            raise AppError(
+                job.error_code or "EXTRACTION_FAILED",
+                job.error_message_safe or "O processamento do documento falhou.",
+                502 if stage == "structuring" else 422,
+                {"stage": stage},
+            )
         if job.status != "completed":
             raise AppError("RESULT_NOT_READY", "O resultado ainda não está disponível.", 409)
         result = await self.session.scalar(

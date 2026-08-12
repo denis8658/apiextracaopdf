@@ -18,3 +18,18 @@ def test_railway_postgresql_url_uses_async_driver():
     assert settings.database_url == (
         "postgresql+asyncpg://user:secret@postgres.railway.internal:5432/railway"
     )
+
+
+def test_structuring_base_url_uses_openai_v1_contract():
+    assert (
+        Settings(
+            _env_file=None, structuring_base_url="https://agent.example/"
+        ).effective_structuring_base_url
+        == "https://agent.example/v1"
+    )
+    assert (
+        Settings(
+            _env_file=None, structuring_base_url="https://agent.example/v1/"
+        ).effective_structuring_base_url
+        == "https://agent.example/v1"
+    )

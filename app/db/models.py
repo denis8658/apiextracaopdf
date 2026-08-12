@@ -85,6 +85,7 @@ class ExtractionJob(UUIDTimestampMixin, Base):
     warnings_json: Mapped[list[str]] = mapped_column(JSONType, default=list)
     page_selector: Mapped[str] = mapped_column(String(255), default="all")
     selected_pages_json: Mapped[list[int]] = mapped_column(JSONType, default=list)
+    structure_output: Mapped[bool] = mapped_column(default=False)
     document: Mapped[Document] = relationship(back_populates="jobs")
     events: Mapped[list["ExtractionEvent"]] = relationship(
         back_populates="job", cascade="all, delete-orphan", order_by="ExtractionEvent.id"

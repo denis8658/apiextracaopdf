@@ -67,6 +67,7 @@ class DocumentService:
         page_selector: str = "all",
         cliente_id: str | None = None,
         obra_id: str | None = None,
+        structure_output: bool = False,
     ) -> CreatedUpload:
         formats = parse_output_formats(output_formats)
         if engine not in {"auto", "native", "marker"}:
@@ -91,7 +92,8 @@ class DocumentService:
             raise
 
         fingerprint = (
-            f"{validated.sha256}:{options.model_dump_json()}:{cliente_id}:{obra_id}"
+            f"{validated.sha256}:{options.model_dump_json()}:{cliente_id}:{obra_id}:"
+            f"{structure_output}"
         ).encode()
         request_sha256 = hashlib.sha256(fingerprint).hexdigest()
         existing_job = None
@@ -165,6 +167,7 @@ class DocumentService:
             warnings_json=[],
             page_selector=options.pages,
             selected_pages_json=options.selected_pages,
+            structure_output=structure_output,
         )
         self.session.add_all([document, job])
         try:

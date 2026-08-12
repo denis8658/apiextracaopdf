@@ -28,9 +28,15 @@ from app.extraction.normalizer import normalize_result
 from app.extraction.router import ExtractionRouter
 from app.schemas.extraction import ExtractionOptions
 from app.schemas.extraction_api import PublicExtractionResult
+from app.services.pdf_structurer_service import PdfStructurerService
 from app.storage import LocalStorageBackend
+from app.structuring.provider import create_provider
 
 logger = logging.getLogger(__name__)
+
+
+class StructuringStageError(Exception):
+    pass
 
 
 def utcnow() -> datetime:
@@ -213,16 +219,32 @@ def public_result(document, job, result, duration_ms: int) -> dict:
     }
 
 
-async def persist_success(session, job_id, routed, duration_ms: int, storage) -> None:
+async def persist_success(session, job_id, routed, duration_ms: int, storage, settings) -> None:
     result = normalize_result(routed.result)
     job = await session.get(ExtractionJob, job_id)
     if not job:
         return
     document = await session.get(Document, job.document_id)
     await _save_images(storage, job.id, result, job.image_output)
-    payload = PublicExtractionResult.model_validate(
+    extraction_payload = PublicExtractionResult.model_validate(
         public_result(document, job, result, duration_ms)
     ).model_dump(mode="json")
+    payload = extraction_payload
+    if job.structure_output:
+        job.current_stage = "structuring"
+        job.progress_percent = 96
+        add_event(session, job.id, "structuring.started", {"progress": 96})
+        await session.commit()
+        try:
+            payload = (
+                await PdfStructurerService(create_provider(settings)).structure(
+                    result.plain_text,
+                    document.cliente_id,
+                    document.obra_id,
+                )
+            ).model_dump(mode="json")
+        except Exception as exc:
+            raise StructuringStageError from exc
     async with session.begin_nested():
         await session.execute(
             delete(DocumentPage).where(DocumentPage.document_id == job.document_id)
@@ -264,11 +286,11 @@ async def persist_success(session, job_id, routed, duration_ms: int, storage) ->
         job.engine_selection_reason = routed.reason
         job.progress_percent = 100
         job.current_page = result.pages[-1].page_number if result.pages else None
-        job.total_pages = len(payload["page_selection"]["requested_pages"])
+        job.total_pages = len(extraction_payload["page_selection"]["requested_pages"])
         job.completed_at = now
         job.processing_duration_ms = duration_ms
         job.engine_version = result.engine_version
-        job.warnings_json = payload["processing"]["warnings"]
+        job.warnings_json = extraction_payload["processing"]["warnings"]
         document.status = "completed"
         document.detected_pdf_type = routed.detected_pdf_type
         document.extraction_engine = result.engine
@@ -293,10 +315,15 @@ async def persist_failure(session, job_id, exc: Exception, duration_ms: int) -> 
         document = await session.get(Document, job.document_id, with_for_update=True)
         retry = job.attempt_count < job.max_attempts
         job.status = "queued" if retry else "failed"
-        job.current_stage = "retrying" if retry else "failed"
+        stage = "structuring" if isinstance(exc, StructuringStageError) else "extraction"
+        job.current_stage = "retrying" if retry else f"{stage}_failed"
         job.failed_at = None if retry else utcnow()
-        job.error_code = "INTERNAL_ERROR"
-        job.error_message_safe = "A extração do documento falhou."
+        job.error_code = "STRUCTURING_FAILED" if stage == "structuring" else "EXTRACTION_FAILED"
+        job.error_message_safe = (
+            "O PDF foi extraído, mas não foi possível estruturar os dados."
+            if stage == "structuring"
+            else "Não foi possível extrair o conteúdo do PDF."
+        )
         job.error_details_internal = "".join(traceback.format_exception(exc))[-16000:]
         job.processing_duration_ms = duration_ms
         if document:
@@ -308,6 +335,7 @@ async def persist_failure(session, job_id, exc: Exception, duration_ms: int) -> 
             {
                 "status": job.status,
                 "error": {"code": job.error_code, "message": job.error_message_safe},
+                "stage": stage,
             },
         )
 
@@ -365,7 +393,7 @@ async def process_job(job: ExtractionJob) -> None:
         )
         duration = int((time.perf_counter() - started) * 1000)
         async with SessionLocal() as session:
-            await persist_success(session, job.id, routed, duration, storage)
+            await persist_success(session, job.id, routed, duration, storage, settings)
         if not document.retain_original:
             await storage.delete(document.storage_key)
         logger.info(

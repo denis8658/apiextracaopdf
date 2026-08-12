@@ -94,6 +94,24 @@ curl -X POST http://localhost:8000/v1/extractions \
   -F 'processing_mode=async'
 ```
 
+Para executar extração e estruturação no mesmo job, acrescente `-F 'structure_output=true'` e
+mantenha `output_format=json`. O endpoint e o acompanhamento assíncrono continuam os mesmos; ao
+concluir, `GET /v1/extractions/{job_id}/result` devolve `contexto` e `itens`.
+
+O estruturador usa uma API compatível com o padrão OpenAI e Structured Outputs. Configure somente
+no ambiente do backend (por exemplo, nas variáveis privadas do Railway):
+
+```dotenv
+STRUCTURING_BASE_URL=https://friendly-intuition-production-9615.up.railway.app/
+STRUCTURING_API_KEY=<segredo>
+STRUCTURING_API_MODE=chat_completions
+STRUCTURING_MODEL=deepseek-v4-pro
+```
+
+O backend acrescenta `/v1` à URL quando necessário. A chave nunca deve ser enviada pelo frontend.
+O JSON estruturado permanece temporário, seguindo o TTL do job; nenhum cliente, obra, pedido ou
+item comercial é criado ou atualizado.
+
 Resposta:
 
 ```json
