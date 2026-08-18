@@ -68,6 +68,10 @@ class DocumentService:
         cliente_id: str | None = None,
         obra_id: str | None = None,
         structure_output: bool = False,
+        save_to_base44: bool = False,
+        oportunidade_id: str | None = None,
+        vendedor_id: str | None = None,
+        base44_context: dict | None = None,
     ) -> CreatedUpload:
         formats = parse_output_formats(output_formats)
         if engine not in {"auto", "native", "marker"}:
@@ -93,7 +97,7 @@ class DocumentService:
 
         fingerprint = (
             f"{validated.sha256}:{options.model_dump_json()}:{cliente_id}:{obra_id}:"
-            f"{structure_output}"
+            f"{structure_output}:{save_to_base44}:{oportunidade_id}:{vendedor_id}:{base44_context}"
         ).encode()
         request_sha256 = hashlib.sha256(fingerprint).hexdigest()
         existing_job = None
@@ -168,6 +172,11 @@ class DocumentService:
             page_selector=options.pages,
             selected_pages_json=options.selected_pages,
             structure_output=structure_output,
+            save_to_base44=save_to_base44,
+            oportunidade_id=oportunidade_id,
+            vendedor_id=vendedor_id,
+            persistence_status="pending" if save_to_base44 else "not_requested",
+            base44_context_json=base44_context,
         )
         self.session.add_all([document, job])
         try:

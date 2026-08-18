@@ -1,3 +1,5 @@
+import re
+
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
@@ -59,7 +61,7 @@ class OpenAIStructuredDataProvider:
         document_content: str,
         output_schema: type[T],
     ) -> ProviderResult[T]:
-        response = await self.client.chat.completions.parse(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -71,11 +73,19 @@ class OpenAIStructuredDataProvider:
                     ),
                 },
             ],
-            response_format=output_schema,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": output_schema.__name__,
+                    "schema": output_schema.model_json_schema(),
+                    "strict": True,
+                },
+            },
         )
-        parsed = response.choices[0].message.parsed if response.choices else None
-        if not isinstance(parsed, BaseModel):
+        content = response.choices[0].message.content if response.choices else None
+        if not content:
             raise ValueError("O provedor não retornou uma saída estruturada válida")
+        parsed = output_schema.model_validate_json(strip_json_fence(content))
         usage = response.usage
         return ProviderResult(
             parsed=parsed,
@@ -83,6 +93,15 @@ class OpenAIStructuredDataProvider:
             input_tokens=usage.prompt_tokens if usage else None,
             output_tokens=usage.completion_tokens if usage else None,
         )
+
+
+JSON_FENCE = re.compile(r"\A\s*```(?:json)?\s*(\{.*\})\s*```\s*\Z", re.DOTALL | re.IGNORECASE)
+
+
+def strip_json_fence(content: str) -> str:
+    """Remove somente uma cerca Markdown que envolva exatamente um objeto JSON."""
+    match = JSON_FENCE.fullmatch(content)
+    return match.group(1) if match else content.strip()
 
 
 def create_provider(settings: Settings) -> OpenAIStructuredDataProvider:

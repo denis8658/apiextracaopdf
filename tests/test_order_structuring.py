@@ -27,7 +27,7 @@ from app.structuring.normalizer import (
     x_to_bool,
 )
 from app.structuring.prompts import ORDER_STRUCTURING_SYSTEM_PROMPT
-from app.structuring.provider import OpenAIStructuredDataProvider
+from app.structuring.provider import OpenAIStructuredDataProvider, strip_json_fence
 from app.workers import structure_worker
 
 
@@ -385,3 +385,6 @@ async def test_real_provider_budget_1790_when_configured():
     assert checked.summary.total_units == 14
     assert checked.summary.distinct_codes_count == 8
     assert all(item.source_page in {1, 2} for item in structured.items)
+def test_strip_json_fence_accepts_provider_markdown_wrapper():
+    assert strip_json_fence('```json\n{"itens": []}\n```') == '{"itens": []}'
+    assert strip_json_fence('{"itens": []}') == '{"itens": []}'

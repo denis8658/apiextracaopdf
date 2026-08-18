@@ -7,17 +7,30 @@ class PdfItemExtraction(BaseModel):
     ordem: int = Field(gt=0)
     codigo_item: str = Field(min_length=1, max_length=128)
     descricao_produto: str | None = None
-    quantidade: int | None = Field(default=None, gt=0)
-    largura: int | float | None = Field(default=None, gt=0)
-    altura: int | float | None = Field(default=None, gt=0)
+    titulo: str | None = None
+    quantidade: int | float | str | None = None
+    largura: int | float | str | None = None
+    altura: int | float | str | None = None
     tem_vidro: bool | None = None
     vidro: str | None = None
     tem_contramarco: bool
     tem_arremate: bool
+    tem_meia_cana: bool = False
+    ambiente: str | None = None
+    arremate: str | None = None
+    contramarco: str | None = None
     informacoes: str | None = None
 
     @field_validator(
-        "codigo_item", "descricao_produto", "vidro", "informacoes", mode="before"
+        "codigo_item",
+        "titulo",
+        "descricao_produto",
+        "vidro",
+        "ambiente",
+        "arremate",
+        "contramarco",
+        "informacoes",
+        mode="before",
     )
     @classmethod
     def normalize_text(cls, value: object) -> object:
@@ -36,8 +49,8 @@ class PdfItemsExtraction(BaseModel):
 class PdfExtractionContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cliente_id: str
-    obra_id: str
+    cliente_id: str | None = None
+    obra_id: str | None = None
 
 
 class StructuredPdfResponse(BaseModel):

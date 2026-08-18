@@ -42,6 +42,36 @@ async def test_image_saving_is_idempotent_across_job_retries(tmp_path):
     assert saved.read_bytes() == b"retry-attempt"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "has_reference", "has_base64"),
+    [("reference", True, False), ("base64", True, True), ("both", True, True)],
+)
+async def test_image_output_modes(tmp_path, mode, has_reference, has_base64):
+    storage = LocalStorageBackend(tmp_path)
+    job_id = uuid.uuid4()
+    image = ExtractedImage(
+        image_id="p12-i3",
+        page_number=12,
+        index=3,
+        format="png",
+        mime_type="image/png",
+        width=1,
+        height=1,
+        sha256="a" * 64,
+        raw_bytes=b"image-content",
+    )
+    result = SimpleNamespace(pages=[SimpleNamespace(images=[image])])
+
+    await _save_images(storage, job_id, result, mode)
+
+    assert bool(image.reference) is has_reference
+    assert bool(image.content_base64) is has_base64
+    if mode == "both":
+        assert image.reference == f"/v1/extractions/{job_id}/files/p12-i3.png"
+        assert image.content_encoding == "base64"
+
+
 def test_public_result_reports_requested_processed_and_skipped_pages():
     document = SimpleNamespace(
         original_filename="documento.pdf",
@@ -133,6 +163,50 @@ async def test_claim_job_changes_state_and_attempt(tmp_path):
         assert claimed.attempt_count == 1
     async with sessions() as second:
         assert await claim_job(second) is None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_persistence_retry_is_claimed_without_rerunning_extraction_attempt(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'retry.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with sessions() as session:
+        document = Document(
+            original_filename="test.pdf",
+            safe_filename="test.pdf",
+            content_type="application/pdf",
+            file_size_bytes=10,
+            sha256="a" * 64,
+            storage_provider="local",
+            storage_key=f"x/{uuid.uuid4()}.pdf",
+            status="queued",
+            detected_pdf_type="native",
+            retain_original=True,
+        )
+        session.add(document)
+        await session.flush()
+        session.add(
+            ExtractionJob(
+                document_id=document.id,
+                status="queued",
+                current_stage="persistence_retry",
+                engine_requested="native",
+                requested_formats=["json"],
+                max_attempts=3,
+                attempt_count=3,
+                save_to_base44=True,
+                persistence_status="failed",
+            )
+        )
+        await session.commit()
+
+    async with sessions() as session:
+        claimed = await claim_job(session)
+        assert claimed is not None
+        assert claimed.current_stage == "persistence_retry"
+        assert claimed.attempt_count == 3
     await engine.dispose()
 
 

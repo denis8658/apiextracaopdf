@@ -34,6 +34,10 @@ class ExtractionService:
         cliente_id: str | None = None,
         obra_id: str | None = None,
         structure_output: bool = False,
+        save_to_base44: bool = False,
+        oportunidade_id: str | None = None,
+        vendedor_id: str | None = None,
+        base44_context: dict | None = None,
     ) -> CreatedUpload:
         created = await self.documents.upload(
             file,
@@ -47,6 +51,10 @@ class ExtractionService:
             cliente_id=cliente_id,
             obra_id=obra_id,
             structure_output=structure_output,
+            save_to_base44=save_to_base44,
+            oportunidade_id=oportunidade_id,
+            vendedor_id=vendedor_id,
+            base44_context=base44_context,
         )
         if not created.reused:
             self.session.add(
@@ -80,14 +88,23 @@ class ExtractionService:
         if job.status == "cancelled":
             raise AppError("JOB_CANCELLED", "O trabalho foi cancelado.", 409)
         if job.status == "failed":
-            stage = "structuring" if job.error_code == "STRUCTURING_FAILED" else "extraction"
+            structuring_codes = {
+                "STRUCTURING_FAILED",
+                "PERFIS_NAO_IDENTIFICADOS",
+                "PERFIL_INVALIDO",
+                "EVENTO_NAO_SUPORTADO",
+            }
+            stage = "structuring" if job.error_code in structuring_codes else "extraction"
+            stored_error = (job.persistence_result_json or {}).get("error", {})
+            details = stored_error.get("details") or {}
+            details["stage"] = stage
             raise AppError(
                 job.error_code or "EXTRACTION_FAILED",
                 job.error_message_safe or "O processamento do documento falhou.",
-                502 if stage == "structuring" else 422,
-                {"stage": stage},
+                422 if job.error_code in structuring_codes - {"STRUCTURING_FAILED"} else 502,
+                details,
             )
-        if job.status != "completed":
+        if job.status not in {"completed", "persistence_failed"}:
             raise AppError("RESULT_NOT_READY", "O resultado ainda não está disponível.", 409)
         result = await self.session.scalar(
             select(DocumentResult).where(DocumentResult.document_id == job.document_id)
@@ -124,6 +141,28 @@ class ExtractionService:
             await self.session.commit()
         await self.storage.delete(document.storage_key)
         await self.storage.delete_prefix(f"jobs/{job.id}")
+
+    async def retry_persistence(self, job_id: uuid.UUID) -> ExtractionJob:
+        job, _ = await self.get_job(job_id)
+        if not job.save_to_base44 or job.persistence_status not in {"failed", "partial_failure"}:
+            raise AppError(
+                "persistence_not_retryable",
+                "Este trabalho não possui uma persistência com falha para repetir.",
+                409,
+            )
+        job.status = "queued"
+        job.current_stage = "persistence_retry"
+        job.error_code = None
+        job.error_message_safe = None
+        self.session.add(
+            ExtractionEvent(
+                job_id=job.id,
+                event_type="persistence_retry_queued",
+                data_json={"job_id": str(job.id), "progress": job.progress_percent},
+            )
+        )
+        await self.session.commit()
+        return job
 
     async def temporary_file(self, job_id: uuid.UUID, filename: str):
         await self.get_job(job_id)

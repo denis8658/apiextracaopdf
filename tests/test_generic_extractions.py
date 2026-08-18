@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 
@@ -147,6 +148,62 @@ def test_structured_output_requires_json(api_client, sample_pdf):
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_structured_output_format"
+
+
+def test_base44_save_requires_opportunity_and_idempotency(api_client, sample_pdf):
+    files = {"file": ("sample.pdf", sample_pdf, "application/pdf")}
+    base = {"cliente_id": "cli", "obra_id": "obra", "save_to_base44": "true"}
+
+    missing_opportunity = api_client.post("/v1/extractions", files=files, data=base)
+    assert missing_opportunity.status_code == 422
+    assert missing_opportunity.json()["error"]["code"] == "missing_oportunidade_id"
+
+    missing_key = api_client.post(
+        "/v1/extractions", files=files, data={**base, "oportunidade_id": "opp"}
+    )
+    assert missing_key.status_code == 422
+    assert missing_key.json()["error"]["code"] == "missing_idempotency_key"
+
+
+def test_context_json_supplies_base44_identifiers(api_client, sample_pdf):
+    files = {"file": ("sample.pdf", sample_pdf, "application/pdf")}
+    context = {
+        "evento": "processar_pdf",
+        "oportunidade_id": "opp-context",
+        "cliente_id": "cli-context",
+        "vendedor_id": "vend-context",
+        "titulo": "Título",
+        "pdf_url": "https://storage.example/sample.pdf",
+        "valor": 123.45,
+    }
+    response = api_client.post(
+        "/v1/extractions",
+        files=files,
+        data={"save_to_base44": "true", "context_json": json.dumps(context)},
+        headers={"Idempotency-Key": "context-1"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "persistence_auth_not_configured"
+
+
+def test_context_json_requires_supported_event(api_client, sample_pdf):
+    files = {"file": ("sample.pdf", sample_pdf, "application/pdf")}
+    missing = api_client.post(
+        "/v1/extractions",
+        files=files,
+        data={"context_json": json.dumps({"oportunidade_id": "opp"})},
+    )
+    unknown = api_client.post(
+        "/v1/extractions",
+        files=files,
+        data={"context_json": json.dumps({"evento": "evento_desconhecido"})},
+    )
+
+    assert missing.status_code == 422
+    assert missing.json()["error"]["code"] == "EVENTO_OBRIGATORIO"
+    assert unknown.status_code == 422
+    assert unknown.json()["error"]["code"] == "EVENTO_NAO_SUPORTADO"
 
 
 @pytest.mark.asyncio

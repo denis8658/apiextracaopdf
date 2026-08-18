@@ -86,6 +86,13 @@ class ExtractionJob(UUIDTimestampMixin, Base):
     page_selector: Mapped[str] = mapped_column(String(255), default="all")
     selected_pages_json: Mapped[list[int]] = mapped_column(JSONType, default=list)
     structure_output: Mapped[bool] = mapped_column(default=False)
+    save_to_base44: Mapped[bool] = mapped_column(default=False)
+    oportunidade_id: Mapped[str | None] = mapped_column(String(255))
+    vendedor_id: Mapped[str | None] = mapped_column(String(255))
+    persistence_status: Mapped[str] = mapped_column(String(32), default="not_requested")
+    persistence_payload_hash: Mapped[str | None] = mapped_column(String(64))
+    persistence_result_json: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
+    base44_context_json: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
     document: Mapped[Document] = relationship(back_populates="jobs")
     events: Mapped[list["ExtractionEvent"]] = relationship(
         back_populates="job", cascade="all, delete-orphan", order_by="ExtractionEvent.id"

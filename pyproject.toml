@@ -21,6 +21,7 @@ dependencies = [
   "easyocr>=1.7.2,<2",
   "openai>=2.21,<3",
   "python-multipart>=0.0.20,<1",
+  "httpx>=0.28,<1",
 ]
 
 [project.optional-dependencies]

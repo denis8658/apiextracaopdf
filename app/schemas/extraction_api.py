@@ -31,6 +31,8 @@ class ExtractionStatusResponse(BaseModel):
     expires_at: datetime | None
     warnings: list[str] = Field(default_factory=list)
     error: dict[str, Any] | None = None
+    persistence_status: str = "not_requested"
+    saved_count: int = 0
 
 
 class PublicBBox(BaseModel):
@@ -76,11 +78,34 @@ class PublicImage(BaseModel):
     height: int
     bbox: PublicBBox | None
     hash: str
-    reference: str | None
-    nearby_text: str | None
-    related_code: str | None
-    related_description: str | None
-    association_confidence: float | None
+    visual_group_id: str | None = None
+    reference: str | None = None
+    mime_type: str | None = None
+    content_encoding: Literal["base64"] | None = None
+    content_base64: str | None = None
+    nearby_text: str | None = None
+    related_item_id: str | None = None
+    related_code: str | None = None
+    related_description: str | None = None
+    association_confidence: float | None = None
+    association_method: str = "unresolved"
+    requires_review: bool = True
+    association_candidates: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PublicItem(BaseModel):
+    id: str
+    page_number: int
+    code: str | None
+    description: str | None
+    bbox: PublicBBox | None
+    code_block_id: str | None
+    description_block_id: str | None
+    text_block_ids: list[str]
+    image_ids: list[str]
+    table_ids: list[str]
+    association_confidence: float
+    requires_review: bool
 
 
 class PublicPage(BaseModel):
@@ -94,6 +119,7 @@ class PublicPage(BaseModel):
     blocks: list[PublicBlock]
     tables: list[PublicTable]
     images: list[PublicImage]
+    items: list[PublicItem] = Field(default_factory=list)
     warnings: list[str]
 
 

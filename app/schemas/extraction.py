@@ -20,7 +20,7 @@ class ExtractionOptions(BaseModel):
     extract_tables: bool = True
     include_coordinates: bool = True
     ignore_decorative_images: bool = True
-    image_output: Literal["reference", "base64", "metadata"] = "reference"
+    image_output: Literal["reference", "base64", "both", "metadata"] = "reference"
     pages: str = "all"
     selected_pages: list[int] = Field(default_factory=list)
 
@@ -53,6 +53,11 @@ class ExtractedTable(BaseModel):
     method: str = "pymupdf"
 
 
+class AssociationCandidate(BaseModel):
+    item_id: str
+    score: float = Field(ge=0, le=1)
+
+
 class ExtractedImage(BaseModel):
     image_id: str
     page_number: int
@@ -65,13 +70,43 @@ class ExtractedImage(BaseModel):
     height: int
     bbox: list[float] | None = None
     sha256: str
+    visual_group_id: str | None = None
     reference: str | None = None
+    mime_type: str | None = None
+    content_encoding: Literal["base64"] | None = None
+    content_base64: str | None = None
     nearby_text: str | None = None
+    related_item_id: str | None = None
     related_code: str | None = None
     related_description: str | None = None
     association_confidence: float | None = Field(default=None, ge=0, le=1)
+    association_method: Literal[
+        "layout_region",
+        "spatial_proximity",
+        "same_column",
+        "caption_match",
+        "code_proximity",
+        "combined",
+        "unresolved",
+    ] = "unresolved"
+    requires_review: bool = True
+    association_candidates: list[AssociationCandidate] = Field(default_factory=list)
     source: Literal["image"] = "image"
     raw_bytes: bytes | None = Field(default=None, exclude=True, repr=False)
+
+class ExtractedItem(BaseModel):
+    item_id: str
+    page_number: int
+    code: str | None = None
+    description: str | None = None
+    bbox: list[float] | None = None
+    code_block_id: str | None = None
+    description_block_id: str | None = None
+    text_block_ids: list[str] = Field(default_factory=list)
+    image_ids: list[str] = Field(default_factory=list)
+    table_ids: list[str] = Field(default_factory=list)
+    association_confidence: float = Field(ge=0, le=1)
+    requires_review: bool = False
 
 
 class ExtractedPage(BaseModel):
@@ -81,6 +116,7 @@ class ExtractedPage(BaseModel):
     blocks: list[ExtractedBlock]
     tables: list[ExtractedTable] = Field(default_factory=list)
     images: list[ExtractedImage] = Field(default_factory=list)
+    items: list[ExtractedItem] = Field(default_factory=list)
     width: float | None = None
     height: float | None = None
     rotation: int = 0

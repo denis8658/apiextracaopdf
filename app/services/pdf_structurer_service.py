@@ -12,7 +12,7 @@ class PdfStructurerService:
         self.provider = provider
 
     async def structure(
-        self, document_content: str, cliente_id: str, obra_id: str
+        self, document_content: str, cliente_id: str | None, obra_id: str | None
     ) -> StructuredPdfResponse:
         provided = await self.provider.parse(
             system_prompt=PDF_ITEMS_STRUCTURING_SYSTEM_PROMPT,

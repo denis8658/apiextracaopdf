@@ -22,6 +22,11 @@ def test_test_interface_is_served(api_client):
     assert "Leitor" in response.text
     assert "/ui/app.js" in response.text
     assert 'id="pages"' in response.text
+    script = api_client.get("/ui/app.js")
+    assert script.status_code == 200
+    assert "MAX_UPLOAD_ATTEMPTS = 5" in script.text
+    assert "RETRY_DELAYS_MS = [2000, 4000, 8000, 16000]" in script.text
+    assert "Idempotency-Key\": crypto.randomUUID()" in script.text
 
 
 def test_cors_preflight_allowed(api_client):

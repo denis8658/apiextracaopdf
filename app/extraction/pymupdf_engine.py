@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import re
 from collections import Counter
 from importlib.metadata import version
 from pathlib import Path
@@ -14,8 +13,6 @@ from app.schemas.extraction import (
     ExtractionOptions,
     ExtractionResult,
 )
-
-CODE_PATTERN = re.compile(r"\b[A-Z]{1,8}(?:[- ]?\d{1,6})\b", re.IGNORECASE)
 
 
 def _bbox(value: Any) -> list[float] | None:
@@ -257,11 +254,15 @@ class PyMuPDFExtractionEngine:
         remaining: int,
     ) -> list[ExtractedImage]:
         images: list[ExtractedImage] = []
-        for index, image in enumerate(page.get_images(full=True), 1):
-            if len(images) >= remaining:
-                break
+        occurrence_index = 0
+        processed_xrefs: set[int] = set()
+        for image in page.get_images(full=True):
+            xref = int(image[0])
+            if xref in processed_xrefs:
+                continue
+            processed_xrefs.add(xref)
             try:
-                extracted = document.extract_image(image[0])
+                extracted = document.extract_image(xref)
                 raw = extracted.get("image", b"")
                 if not raw:
                     continue
@@ -270,38 +271,34 @@ class PyMuPDFExtractionEngine:
                 height = int(extracted.get("height") or image[3] or 0)
                 repeated = image_counts[digest] > 1
                 image_type = cls._classify_image(width, height, repeated)
-                if options.ignore_decorative_images and image_type in {"logo", "icon"}:
-                    continue
-                rects = page.get_image_rects(image[0])
-                bbox = _bbox(rects[0]) if rects and options.include_coordinates else None
-                nearby = cls._nearby_text(bbox, blocks)
-                code_match = CODE_PATTERN.search(nearby or "")
-                images.append(
-                    ExtractedImage(
-                        image_id=f"p{page_number}-i{index}",
-                        page_number=page_number,
-                        index=index,
-                        image_type=image_type,
-                        format=str(extracted.get("ext") or "bin"),
-                        width=width,
-                        height=height,
-                        bbox=bbox,
-                        sha256=digest,
-                        nearby_text=nearby,
-                        related_code=code_match.group(0) if code_match else None,
-                        related_description=nearby,
-                        association_confidence=0.8 if nearby else None,
-                        raw_bytes=raw,
+                rects = page.get_image_rects(xref)
+                occurrences = rects or [None]
+                for rect in occurrences:
+                    if len(images) >= remaining:
+                        break
+                    occurrence_index += 1
+                    bbox = _bbox(rect) if rect is not None and options.include_coordinates else None
+                    images.append(
+                        ExtractedImage(
+                            image_id=f"p{page_number}-i{occurrence_index}",
+                            page_number=page_number,
+                            index=occurrence_index,
+                            image_type=image_type,
+                            format=str(extracted.get("ext") or "bin"),
+                            width=width,
+                            height=height,
+                            bbox=bbox,
+                            sha256=digest,
+                            visual_group_id=f"vg-{digest[:16]}",
+                            raw_bytes=raw,
+                        )
                     )
-                )
             except Exception:
                 continue
         return images
 
     @staticmethod
     def _classify_image(width: int, height: int, repeated: bool) -> str:
-        if repeated:
-            return "logo"
         if width <= 64 or height <= 64:
             return "icon"
         ratio = width / height if height else 1
@@ -310,20 +307,6 @@ class PyMuPDFExtractionEngine:
         if width >= 300 and height >= 300:
             return "technical_drawing"
         return "diagram"
-
-    @staticmethod
-    def _nearby_text(bbox: list[float] | None, blocks: list[ExtractedBlock]) -> str | None:
-        if not bbox:
-            return None
-        center_y = (bbox[1] + bbox[3]) / 2
-        candidates = [
-            (abs(((block.bbox[1] + block.bbox[3]) / 2) - center_y), block.text or "")
-            for block in blocks
-            if block.bbox and block.text
-        ]
-        candidates.sort(key=lambda item: item[0])
-        text = " ".join(item[1].replace("\n", " ") for item in candidates[:2]).strip()
-        return text[:1000] or None
 
     @staticmethod
     def _to_markdown(

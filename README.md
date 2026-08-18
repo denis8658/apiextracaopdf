@@ -98,6 +98,107 @@ Para executar extração e estruturação no mesmo job, acrescente `-F 'structur
 mantenha `output_format=json`. O endpoint e o acompanhamento assíncrono continuam os mesmos; ao
 concluir, `GET /v1/extractions/{job_id}/result` devolve `contexto` e `itens`.
 
+### Extração, estruturação e salvamento opcional na Base44
+
+O salvamento comercial nunca acontece por padrão. Para habilitá-lo, envie
+`save_to_base44=true`, `oportunidade_id` e `Idempotency-Key`; o endpoint também exige a chave de
+entrada configurada em `PERSISTENCE_API_KEY` no header `X-API-Key`. `cliente_id`, `obra_id` e
+`vendedor_id` são copiados quando informados e nunca são inventados.
+
+Quando os metadados chegam juntos em JSON, envie-os no campo multipart `context_json`:
+
+```json
+{
+  "evento": "processar_pdf",
+  "oportunidade_id": "opp_123",
+  "cliente_id": "cliente_123",
+  "vendedor_id": "usuario_123",
+  "aprovado_por_id": "admin_123",
+  "aprovado_por_nome": "Administrador",
+  "data_aprovacao": "2026-08-14T12:30:00Z",
+  "titulo": "Título da oportunidade",
+  "pdf_url": "https://storage.example/orcamento.pdf",
+  "valor": 12345.67
+}
+```
+
+O `pdf_url` é mantido somente no contexto temporário de auditoria; o PDF processado é o arquivo do
+campo `file` e a URL não é enviada para `ItensPedido`. Aprovação e título são copiados para cada
+registro. O `valor` recebido representa o total da oportunidade, permanece apenas no contexto do
+job e não é replicado nos itens. O fluxo também envia `status_item=pendente`, `pendente_medicao=false` e
+`progresso_item_percent=0`; `tem_arremate` e `tem_meia_cana` são derivados do conteúdo estruturado.
+
+```bash
+curl -X POST http://localhost:8000/v1/extractions \
+  -H 'X-API-Key: CHAVE_INTERNA' \
+  -H 'Idempotency-Key: importacao-opp-123-001' \
+  -F 'file=@orcamento.pdf;type=application/pdf' \
+  -F 'output_format=json' \
+  -F 'save_to_base44=true' \
+  -F 'oportunidade_id=opp_123' \
+  -F 'obra_id=obra_123' \
+  -F 'cliente_id=cliente_123' \
+  -F 'vendedor_id=usuario_123'
+```
+
+O worker extrai, executa OCR quando necessário, estrutura e valida o lote inteiro antes de chamar
+`POST /entities/ItensPedido/bulk`. Somente o array tipado é enviado; texto bruto, Markdown,
+blocos, campos de sistema e credenciais não são enviados. Falhas permanentes `400`, `401`, `403`,
+`404` e `422` não são repetidas; timeout, `429`, `500`, `502`, `503` e `504` usam retry limitado.
+
+O resultado separa `structured` de `persistence`, incluindo contagens e IDs confirmados. Uma falha
+externa mantém o JSON estruturado temporário e termina como `persistence_failed`. Depois de corrigir
+a integração, repita somente o envio, sem OCR ou IA:
+
+```bash
+curl -X POST http://localhost:8000/v1/extractions/JOB_ID/persistence/retry \
+  -H 'X-API-Key: CHAVE_INTERNA'
+```
+
+As etapas `structuring_items`, `validating_items`, `mapping_base44_payload`, `saving_base44`,
+`persistence_completed` e `persistence_failed` são publicadas pelo SSE e aparecem no status.
+Reutilizar a mesma `Idempotency-Key` com a mesma requisição devolve o job existente; conteúdo
+diferente retorna `409 idempotency_conflict`. Códigos `IDsecao` repetidos são ocorrências legítimas
+e permanecem separados.
+
+### Roteamento para plano de corte
+
+O campo obrigatório `evento` seleciona o estruturador depois da extração. `processar_pdf` mantém o
+fluxo de itens acima. `criar_plano_corte` usa um prompt independente para extrair somente os perfis
+de corte e grava um único registro em `POST /entities/PlanoCorte`:
+
+```json
+{
+  "evento": "criar_plano_corte",
+  "obra_id": "obra_123",
+  "obra_nome": "Residencial Aurora",
+  "cliente_id": "cliente_123",
+  "cliente_nome": "Cliente Exemplo",
+  "item_pedido_id": "item_456",
+  "item_idsecao": "JC2",
+  "item_descricao": "Janela de correr",
+  "item_largura": 2000,
+  "item_altura": 1200,
+  "item_quantidade": 2,
+  "item_ambiente": "Suíte",
+  "item_vidro": "Temperado 8 mm",
+  "item_contramarco": "sim",
+  "pdf_url": "https://storage.example/plano.pdf"
+}
+```
+
+Os metadados do item vêm exclusivamente desse contexto confiável. A IA extrai somente `perfil`,
+`qtd`, `medida_mm`, `corte`, `descricao` e `peso_liquido_kg`. Linhas com o mesmo perfil e cortes ou
+medidas diferentes permanecem separadas. O backend gera `plano_id`, calcula `total_itens`,
+`total_perfis` e `peso_total_kg`, e define `status=pendente`. Nenhum campo fora do schema de
+`PlanoCorte` é enviado à Base44.
+
+Contexto sem `evento` retorna `EVENTO_OBRIGATORIO`; evento desconhecido retorna
+`EVENTO_NAO_SUPORTADO`. Se nenhum perfil for identificado, o job termina com
+`PERFIS_NAO_IDENTIFICADOS` e o `item_pedido_id`, sem chamar a Base44. Falha de gravação do plano
+retorna `ERRO_PERSISTENCIA_PLANO_CORTE` e pode ser reenviada pelo endpoint de retry, preservando o
+mesmo payload e `plano_id`.
+
 O estruturador usa uma API compatível com o padrão OpenAI e Structured Outputs. Configure somente
 no ambiente do backend (por exemplo, nas variáveis privadas do Railway):
 
@@ -155,8 +256,9 @@ Eventos persistem apenas pelo TTL do job e incluem `job.queued`, `job.started`, 
 encerra no estado terminal e tem timeout configurável.
 
 `output_format` aceita `text`, `markdown` ou `json` (padrão). `ocr_mode` aceita `auto`, `always` e
-`never`. `image_output` aceita referência temporária, Base64 ou somente metadados. Referências não
-expõem caminhos internos e expiram com o job.
+`never`. `image_output` aceita `reference`, `base64`, `both` ou `metadata`. Referências não expõem
+caminhos internos e expiram com o job; `both` devolve a referência e os campos Base64 na mesma
+ocorrência.
 
 `pages` define as páginas processadas e usa numeração iniciada em 1. O padrão é `all`; também
 aceita uma página (`5`), lista (`1,3,8`), intervalo (`10-20`), combinação (`1,3,5-10`), páginas
@@ -169,7 +271,10 @@ O JSON público contém `schema_version`, metadados do documento, `page_selectio
 páginas, blocos,
 tabelas, imagens e estatísticas. Cada bloco declara `source`: `native`, `ocr`, `image`, `table`,
 `metadata` ou `hybrid`. Tabelas incluem cabeçalhos, linhas, colunas, células, Markdown, método e
-confiança. Imagens incluem hash, classificação determinística, coordenadas e associação textual.
+confiança. Imagens incluem hash, `visual_group_id`, coordenadas, candidatos e relacionamento com
+um item. Cada página preserva `blocks`, `tables` e `images` e acrescenta `items` como camada
+derivada. O vínculo é bidirecional por `item.image_ids` e `image.related_item_id`; relações
+ambíguas permanecem `unresolved` e recebem até três candidatos ordenados.
 
 ## OCR automático e normalização
 

@@ -27,6 +27,8 @@ const elements = {
 };
 
 const baseUrl = () => elements.apiBase.value.replace(/\/$/, "");
+const MAX_UPLOAD_ATTEMPTS = 5;
+const RETRY_DELAYS_MS = [2000, 4000, 8000, 16000];
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const timer = setTimeout(resolve, ms);
   signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
@@ -45,7 +47,10 @@ async function request(path, options = {}) {
   const response = await fetch(`${baseUrl()}${path}`, options);
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("json") ? await response.json() : await response.text();
-  if (!response.ok) throw payload;
+  if (!response.ok) {
+    if (payload && typeof payload === "object") payload.httpStatus = response.status;
+    throw payload;
+  }
   return payload;
 }
 
@@ -99,13 +104,19 @@ async function pollDocument(documentId, signal) {
         try {
           const job = await request(`/api/v1/extraction-jobs/${state.jobId}`, { signal });
           if (job.error_message_safe) {
-            throw { message: `${job.error_message_safe} (${job.error_code || document.status})` };
+            throw {
+              message: `${job.error_message_safe} (${job.error_code || document.status})`,
+              retryable: document.status === "failed",
+            };
           }
         } catch (error) {
           if (error?.message) throw error;
         }
       }
-      throw { message: `O processamento terminou com status “${document.status}”.` };
+      throw {
+        message: `O processamento terminou com status “${document.status}”.`,
+        retryable: document.status === "failed",
+      };
     }
     await sleep(2000, signal);
   }
@@ -159,30 +170,60 @@ async function handleSubmit(event) {
   elements.statusPill.textContent = "upload";
   elements.progressBar.style.width = "3%";
 
-  const formData = new FormData();
-  formData.append("file", state.file);
-  formData.append("cliente_id", elements.clienteId.value);
-  formData.append("obra_id", elements.obraId.value);
-  formData.append("engine", elements.engine.value);
-  formData.append("output_formats", "text,markdown,json");
-  formData.append("retain_original", String(elements.retain.checked));
-  formData.append("pages", elements.pages.value || "all");
-  formData.append("structure_output", String(elements.structureOutput.checked));
-
   try {
-    const upload = await request("/api/v1/documents", {
-      method: "POST",
-      headers: { "X-Request-ID": crypto.randomUUID(), "Idempotency-Key": crypto.randomUUID() },
-      body: formData,
+    let lastError;
+    for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+      const formData = new FormData();
+      formData.append("file", state.file);
+      formData.append("cliente_id", elements.clienteId.value);
+      formData.append("obra_id", elements.obraId.value);
+      formData.append("engine", elements.engine.value);
+      formData.append("output_formats", "text,markdown,json");
+      formData.append("retain_original", String(elements.retain.checked));
+      formData.append("pages", elements.pages.value || "all");
+      formData.append("structure_output", String(elements.structureOutput.checked));
+
+      elements.caption.textContent = `Tentativa ${attempt} de ${MAX_UPLOAD_ATTEMPTS}`;
+      elements.progressMessage.textContent = attempt === 1 ? "Enviando documento" : "Reenviando documento";
+      elements.submit.firstElementChild.textContent = `Processando ${attempt}/${MAX_UPLOAD_ATTEMPTS}`;
+
+      try {
+        const upload = await request("/api/v1/documents", {
+          method: "POST",
+          headers: {
+            "X-Request-ID": crypto.randomUUID(),
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: formData,
+          signal: state.pollController.signal,
+        });
+        state.documentId = upload.document_id;
+        state.jobId = upload.job_id;
+        elements.documentId.textContent = state.documentId;
+        elements.jobId.textContent = state.jobId;
+        localStorage.setItem("leitor:lastDocument", state.documentId);
+        await pollDocument(state.documentId, state.pollController.signal);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        const status = Number(error?.httpStatus || error?.error?.httpStatus || 0);
+        const transientHttp = status === 408 || status === 429 || status >= 500;
+        const canRetry = error?.retryable || transientHttp;
+        if (!canRetry || attempt === MAX_UPLOAD_ATTEMPTS) throw error;
+
+        const delay = RETRY_DELAYS_MS[attempt - 1];
+        elements.statusPill.textContent = "retry";
+        elements.progressMessage.textContent = `Nova tentativa em ${delay / 1000}s`;
+        elements.caption.textContent = `Falha na tentativa ${attempt}; aguardando`;
+        await sleep(delay, state.pollController.signal);
+      }
+    }
+    if (lastError) throw lastError;
+
+    state.result = await request(`/api/v1/documents/${state.documentId}/result?format=json`, {
       signal: state.pollController.signal,
     });
-    state.documentId = upload.document_id;
-    state.jobId = upload.job_id;
-    elements.documentId.textContent = state.documentId;
-    elements.jobId.textContent = state.jobId;
-    localStorage.setItem("leitor:lastDocument", state.documentId);
-    await pollDocument(state.documentId, state.pollController.signal);
-    state.result = await request(`/api/v1/documents/${state.documentId}/result?format=json`, { signal: state.pollController.signal });
     renderResult(state.result?.itens ? "json" : "text");
     elements.results.classList.remove("hidden");
     elements.results.scrollIntoView({ behavior: "smooth", block: "start" });

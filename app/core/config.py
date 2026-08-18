@@ -32,6 +32,19 @@ class Settings(BaseSettings):
     easyocr_model_path: Path = Path("./tmp/easyocr-models")
     max_images_per_document: int = Field(500, ge=0)
     ignore_repeated_images: bool = True
+    association_min_confidence: float = Field(0.50, ge=0, le=1)
+    association_strong_confidence: float = Field(0.75, ge=0, le=1)
+    association_ambiguity_margin: float = Field(0.08, ge=0, le=1)
+    association_max_candidates: int = Field(3, ge=1, le=10)
+    association_region_weight: float = Field(0.42, ge=0, le=1)
+    association_column_weight: float = Field(0.22, ge=0, le=1)
+    association_row_weight: float = Field(0.10, ge=0, le=1)
+    association_proximity_weight: float = Field(0.28, ge=0, le=1)
+    association_code_weight: float = Field(0.08, ge=0, le=1)
+    association_code_patterns: list[str] = [
+        r"\b[A-Z]{1,6}[- ]?\d{2,6}\b",
+        r"\b[A-Z]{1,6}\d{2,6}\b",
+    ]
     extraction_worker_poll_seconds: float = Field(2, gt=0)
     extraction_max_attempts: int = Field(3, ge=1)
     extraction_timeout_seconds: int = Field(900, gt=0)
@@ -51,6 +64,14 @@ class Settings(BaseSettings):
     order_structuring_prompt_version: str = "1.0.0"
     order_structuring_schema_version: str = "1.0.0"
     structuring_auto_approve_min_confidence: float = Field(0.90, ge=0, le=1)
+    base44_api_base_url: str = "https://inalluminio.base44.app/api"
+    base44_api_key: SecretStr | None = None
+    base44_itens_pedido_path: str = "/entities/ItensPedido/bulk"
+    base44_plano_corte_path: str = "/entities/PlanoCorte"
+    base44_request_timeout_seconds: float = Field(30, gt=0)
+    base44_max_retries: int = Field(3, ge=1, le=10)
+    persistence_api_key: SecretStr | None = None
+    max_structured_items: int = Field(1000, ge=1)
     delete_physical_file: bool = False
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     cors_allow_credentials: bool = True
